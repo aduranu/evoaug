@@ -3,6 +3,9 @@ EvoAug2: PyTorch DataLoader implementation of EvoAug functionality.
 
 This module provides the same augmentation capabilities as RobustModel but
 as a standalone PyTorch Dataset/DataLoader that can be used with any model.
+
+NOTE: should include callbacks??
+
 """
 
 import torch
@@ -152,7 +155,7 @@ class AugmentedGenomicDataset(Dataset):
         self.apply_augmentations = False
 
 
-class AugmentedGenomicDataLoader:
+class RobustLoader:
     """
     Convenience class that combines AugmentedGenomicDataset with DataLoader.
     
