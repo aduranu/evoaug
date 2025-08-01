@@ -148,20 +148,19 @@ class RandomInsertion(AugmentBase):
         # loop over each sequence
         x_aug = []
         for seq, insertion, insert_len, insert_ind in zip(x, insertions, insert_lens, insert_inds):
-
-            # get index of half insert_len (to pad random DNA at beginning of sequence)
-            insert_beginning_len = torch.div((self.insert_max - insert_len), 2, rounding_mode='floor').item()
-
-            # index for other half (to pad random DNA at end of sequence)
-            insert_end_len = self.insert_max - insert_len - insert_beginning_len
-
-            # removes deletion and pads beginning and end of sequence with random DNA to ensure same length
-            x_aug.append( torch.cat([insertion[:,:insert_beginning_len],                                # random dna padding
-                                     seq[:,:insert_ind],                                                # sequence up to insertion start index
-                                     insertion[:,insert_beginning_len:insert_beginning_len+insert_len], # random insertion
-                                     seq[:,insert_ind:],                                                # sequence after insertion end index
-                                     insertion[:,insert_beginning_len+insert_len:self.insert_max]],     # random dna padding
-                                    -1)) # concatenation axis
+            # Insert random DNA
+            augmented_seq = torch.cat([
+                seq[:, :insert_ind],
+                insertion[:, :insert_len],
+                seq[:, insert_ind:]
+            ], -1)
+            # Truncate equally from both ends
+            extra = augmented_seq.shape[-1] - L
+            if extra > 0:
+                trim_left = extra // 2
+                trim_right = extra - trim_left
+                augmented_seq = augmented_seq[:, trim_left:augmented_seq.shape[-1]-trim_right]
+            x_aug.append(augmented_seq)
         return torch.stack(x_aug)
 
 

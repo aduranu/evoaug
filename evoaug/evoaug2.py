@@ -1,214 +1,220 @@
 """
-Model (implemented in Pytorch Lightning) demonstrating how to use augmentations
-during training.
+EvoAug2: PyTorch DataLoader implementation of EvoAug functionality.
+
+This module provides the same augmentation capabilities as RobustModel but
+as a standalone PyTorch Dataset/DataLoader that can be used with any model.
 """
 
 import torch
-import lightning.pytorch as pl
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
+from typing import List, Optional, Tuple, Union
+from evoaug.augment import AugmentBase
 
 
-class RobustModel(pl.LightningModule):
-    """PyTorch Lightning module to specify how augmentation should be applied to a model.
-
+class AugmentedGenomicDataset(Dataset):
+    """
+    PyTorch Dataset that applies EvoAug-style augmentations to genomic sequences.
+    
+    This dataset wraps an existing dataset and applies augmentations on-the-fly
+    during training, while optionally disabling them for validation/finetuning.
+    
     Parameters
     ----------
-    model : torch.nn.Module
-        PyTorch model.
-    criterion : callable
-        PyTorch loss function
-    optimizer : torch.optim.Optimizer or dict
-        PyTorch optimizer as a class or dictionary
-    augment_list : list
-        List of data augmentations, each a callable class from augment.py.
-        Default is empty list -- no augmentations.
-    max_augs_per_seq : int
-        Maximum number of augmentations to apply to each sequence. Value is superceded by the number of augmentations in augment_list.
-    hard_aug : bool
-        Flag to set a hard number of augmentations, otherwise the number of augmentations is set randomly up to max_augs_per_seq, default is True.
-    finetune : bool
-        Flag to turn off augmentations during training, default is False.
-    inference_aug : bool
-        Flag to turn on augmentations during inference, default is False.
+    base_dataset : torch.utils.data.Dataset
+        The underlying dataset that provides (sequence, target) pairs.
+    augment_list : List[AugmentBase]
+        List of data augmentations to apply.
+    max_augs_per_seq : int, optional
+        Maximum number of augmentations to apply per sequence. Defaults to 0.
+    hard_aug : bool, optional
+        If True, always apply exactly max_augs_per_seq augmentations.
+        If False, randomly sample 1 to max_augs_per_seq augmentations. Defaults to True.
+    apply_augmentations : bool, optional
+        Whether to apply augmentations. Can be toggled for finetuning. Defaults to True.
     """
-
-    def __init__(self, model, criterion, optimizer, augment_list=[], max_augs_per_seq=0, hard_aug=True, finetune=False, inference_aug=False):
-        super().__init__()
-        self.model = model
-        self.criterion = criterion
-        self.optimizer = optimizer
-        self.augment_list = augment_list 
-        self.max_augs_per_seq = np.minimum(max_augs_per_seq, len(augment_list))
+    
+    def __init__(self, 
+                 base_dataset: Dataset,
+                 augment_list: List[AugmentBase] = [],
+                 max_augs_per_seq: int = 0,
+                 hard_aug: bool = True,
+                 apply_augmentations: bool = True):
+        
+        self.base_dataset = base_dataset
+        self.augment_list = augment_list
+        self.max_augs_per_seq = min(max_augs_per_seq, len(augment_list))
         self.hard_aug = hard_aug
-        self.inference_aug = inference_aug
-        self.optimizer = optimizer
+        self.apply_augmentations = apply_augmentations
         self.max_num_aug = len(augment_list)
-        self.insert_max = augment_max_len(augment_list)
-        self.finetune = finetune
-
-    def forward(self, x):
-        """Standard forward pass."""
-        y_hat = self.model(x)
-        return y_hat
-
-    def configure_optimizers(self):
-        """Standard optimizer configuration."""
-        return self.optimizer
-
-    def training_step(self, batch, batch_idx):
-        """Training step with augmentations."""
-        x, y = batch
-        if self.finetune: # if finetune, no augmentations
-            if self.insert_max:  # if insert_max is larger than 0, then pad each sequence with random DNA
-                x = self._pad_end(x)
+        self.insert_max = self._get_insert_max()
+        
+    def __len__(self):
+        return len(self.base_dataset)
+    
+    def __getitem__(self, idx):
+        # Get the original data
+        data = self.base_dataset[idx]
+        
+        # Handle different data formats
+        if isinstance(data, (tuple, list)) and len(data) >= 2:
+            sequence, target = data[0], data[1]
         else:
-            x = self._apply_augment(x)
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        return loss
-
-
-    def validation_step(self, batch, batch_idx):
-        """Validation step without (or with) augmentations."""
-        x, y = batch
-        if self.inference_aug:  # if inference_aug, then apply augmentations during inference
-            x = self._apply_augment(x)
+            sequence = data
+            target = None
+            
+        # Apply augmentations if enabled
+        if self.apply_augmentations and self.augment_list:
+            sequence = self._apply_augmentations(sequence)
+        elif self.insert_max > 0:
+            # If no augmentations but we need padding for consistency
+            sequence = self._pad_end(sequence)
+            
+        if target is not None:
+            return sequence, target
         else:
-            if self.insert_max: # if insert_max is larger than 0, then pad each sequence with random DNA
-                x = self._pad_end(x)
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-
-
-    def test_step(self, batch, batch_idx):
-        """Test step without (or with) augmentations."""
-        x, y = batch
-        if self.inference_aug: # if inference_aug, then apply augmentations during inference
-            x = self._apply_augment(x)
-        else:
-            if self.insert_max: # if insert_max is larger than 0, then pad each sequence with random DNA
-                x = self._pad_end(x)
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('test_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-
-
-    def predict_step(self, batch, batch_idx):
-        """Prediction step without (or with) augmentations."""
-        x = batch
-        if self.inference_aug: # if inference_aug, then apply augmentations during inference
-            x = self._apply_augment(x)
-        else:
-            if self.insert_max: # if insert_max is larger than 0, then pad each sequence with random DNA
-                x = self._pad_end(x)
-        return self(x)
-
-
-    def _sample_aug_combos(self, batch_size):
-        """Set the number of augmentations and randomly select augmentations to apply
-        to each sequence.
-        """
-        # determine the number of augmentations per sequence
+            return sequence
+    
+    def _get_insert_max(self) -> int:
+        """Get the maximum insertion length from augmentations."""
+        insert_max = 0
+        for augment in self.augment_list:
+            if hasattr(augment, 'insert_max'):
+                insert_max = augment.insert_max
+        return insert_max
+    
+    def _sample_aug_combos(self) -> List[List[int]]:
+        """Sample augmentation combinations for a single sequence."""
         if self.hard_aug:
-            batch_num_aug = self.max_augs_per_seq * np.ones((batch_size,), dtype=int)
+            num_augs = self.max_augs_per_seq
         else:
-            batch_num_aug = np.random.randint(1, self.max_augs_per_seq + 1, (batch_size,))
+            num_augs = np.random.randint(1, self.max_augs_per_seq + 1)
+            
+        if num_augs == 0:
+            return []
+            
+        # Randomly choose augmentations
+        aug_indices = list(sorted(np.random.choice(self.max_num_aug, num_augs, replace=False)))
+        return [aug_indices]
+    
+    def _apply_augmentations(self, sequence: torch.Tensor) -> torch.Tensor:
+        """Apply augmentations to a single sequence."""
+        if not self.augment_list:
+            return sequence
+            
+        # Sample augmentation combination
+        aug_combos = self._sample_aug_combos()
+        if not aug_combos:
+            return sequence
+            
+        aug_indices = aug_combos[0]
+        sequence = sequence.unsqueeze(0)  # Add batch dimension
+        
+        # Apply augmentations
+        insert_status = True
+        for aug_index in aug_indices:
+            sequence = self.augment_list[aug_index](sequence)
+            if hasattr(self.augment_list[aug_index], 'insert_max'):
+                insert_status = False
+                
+        # Add padding if needed
+        if insert_status and self.insert_max > 0:
+            sequence = self._pad_end(sequence)
+            
+        return sequence.squeeze(0)  # Remove batch dimension
+    
+    def _pad_end(self, sequence: torch.Tensor) -> torch.Tensor:
+        """Add random DNA padding to the end of a sequence."""
+        if self.insert_max <= 0:
+            return sequence
+            
+        # Handle both single sequences and batches
+        if sequence.dim() == 3:  # Batch of sequences
+            N, A, L = sequence.shape
+            a = torch.eye(A)
+            p = torch.tensor([1/A for _ in range(A)])
+            padding = torch.stack([a[p.multinomial(self.insert_max, replacement=True)].transpose(0,1) 
+                                 for _ in range(N)]).to(sequence.device)
+            return torch.cat([sequence, padding], dim=2)
+        else:  # Single sequence
+            A, L = sequence.shape
+            a = torch.eye(A)
+            p = torch.tensor([1/A for _ in range(A)])
+            padding = a[p.multinomial(self.insert_max, replacement=True)].transpose(0,1).to(sequence.device)
+            return torch.cat([sequence, padding], dim=1)
+    
+    def enable_augmentations(self):
+        """Enable augmentations (for training)."""
+        self.apply_augmentations = True
+    
+    def disable_augmentations(self):
+        """Disable augmentations (for finetuning/validation)."""
+        self.apply_augmentations = False
 
-        # randomly choose which subset of augmentations from augment_list
-        aug_combos = [ list(sorted(np.random.choice(self.max_num_aug, sample, replace=False))) for sample in batch_num_aug ]
-        return aug_combos
 
-
-    def _apply_augment(self, x):
-        """Apply augmentations to each sequence in batch, x."""
-        # number of augmentations per sequence
-        aug_combos = self._sample_aug_combos(x.shape[0])
-
-        # apply augmentation combination to sequences
-        x_new = []
-        for aug_indices, seq in zip(aug_combos, x):
-            seq = torch.unsqueeze(seq, dim=0)
-            insert_status = True   # status to see if random DNA padding is needed
-            for aug_index in aug_indices:
-                seq = self.augment_list[aug_index](seq)
-                if hasattr(self.augment_list[aug_index], 'insert_max'):
-                    insert_status = False
-            if insert_status:
-                if self.insert_max:
-                    seq = self._pad_end(seq)
-            x_new.append(seq)
-        return torch.cat(x_new)
-
-
-    def _pad_end(self, x):
-        """Add random DNA padding of length insert_max to the end of each sequence in batch."""
-        N, A, L = x.shape
-        a = torch.eye(A)
-        p = torch.tensor([1/A for _ in range(A)])
-        padding = torch.stack([a[p.multinomial(self.insert_max, replacement=True)].transpose(0,1) for _ in range(N)]).to(x.device)
-        x_padded = torch.cat( [x, padding.to(x.device)], dim=2 )
-        return x_padded
-
-
-    def finetune_mode(self, optimizer=None):
-        """Turn on finetune flag -- no augmentations during training."""
-        self.finetune = True
-        if optimizer != None:
-            self.optimizer = optimizer
-
-
-
-
-def load_model_from_checkpoint(model, checkpoint_path):
-    """Load PyTorch lightning model from checkpoint.
-
+class AugmentedGenomicDataLoader:
+    """
+    Convenience class that combines AugmentedGenomicDataset with DataLoader.
+    
+    This provides a simple interface similar to the original RobustModel but
+    as a data loader that can be used with any PyTorch model.
+    
     Parameters
     ----------
-    model : RobustModel
-        RobustModel instance.
-    checkpoint_path : str
-        path to checkpoint of model weights
-
-    Returns
-    -------
-    RobustModel
-        Object with weights and config loaded from checkpoint.
+    base_dataset : torch.utils.data.Dataset
+        The underlying dataset.
+    augment_list : List[AugmentBase]
+        List of augmentations to apply.
+    max_augs_per_seq : int, optional
+        Maximum augmentations per sequence. Defaults to 0.
+    hard_aug : bool, optional
+        Whether to use hard augmentation count. Defaults to True.
+    batch_size : int, optional
+        Batch size for the DataLoader. Defaults to 32.
+    shuffle : bool, optional
+        Whether to shuffle the data. Defaults to True.
+    num_workers : int, optional
+        Number of worker processes. Defaults to 0.
+    **kwargs
+        Additional arguments passed to DataLoader.
     """
-    return model.load_from_checkpoint(checkpoint_path,
-        model=model.model,
-        criterion=model.criterion,
-        optimizer=model.optimizer,
-        augment_list=model.augment_list,
-        max_augs_per_seq=model.max_augs_per_seq,
-        hard_aug=model.hard_aug,
-        finetune=model.finetune,
-        inference_aug=model.inference_aug
-    )
-
-
-#------------------------------------------------------------------------
-# Helper function
-#------------------------------------------------------------------------
-
-
-def augment_max_len(augment_list):
-    """Determine whether insertions are applied to determine the insert_max,
-    which will be applied to pad other sequences with random DNA.
-
-    Parameters
-    ----------
-    augment_list : list
-        List of augmentations.
-
-    Returns
-    -------
-    int
-        Value for insert max.
-    """
-    insert_max = 0
-    for augment in augment_list:
-        if hasattr(augment, 'insert_max'):
-            insert_max = augment.insert_max
-    return insert_max
+    
+    def __init__(self,
+                 base_dataset: Dataset,
+                 augment_list: List[AugmentBase] = [],
+                 max_augs_per_seq: int = 0,
+                 hard_aug: bool = True,
+                 batch_size: int = 32,
+                 shuffle: bool = True,
+                 num_workers: int = 0,
+                 **kwargs):
+        
+        self.augmented_dataset = AugmentedGenomicDataset(
+            base_dataset=base_dataset,
+            augment_list=augment_list,
+            max_augs_per_seq=max_augs_per_seq,
+            hard_aug=hard_aug,
+            apply_augmentations=True
+        )
+        
+        self.dataloader = DataLoader(
+            self.augmented_dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            **kwargs
+        )
+    
+    def __iter__(self):
+        return iter(self.dataloader)
+    
+    def __len__(self):
+        return len(self.dataloader)
+    
+    def enable_augmentations(self):
+        """Enable augmentations."""
+        self.augmented_dataset.enable_augmentations()
+    
+    def disable_augmentations(self):
+        """Disable augmentations (for finetuning)."""
+        self.augmented_dataset.disable_augmentations()
