@@ -134,6 +134,10 @@ class RandomInsertion(AugmentBase):
         """
         N, A, L = x.shape
 
+        # If insert_max is 0, return original sequences without modification
+        if self.insert_max <= 0:
+            return x
+
         # sample random DNA
         a = torch.eye(A)
         p = torch.tensor([1/A for _ in range(A)])
