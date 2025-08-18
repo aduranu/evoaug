@@ -129,11 +129,10 @@ class RandomInsertion(AugmentBase):
         Returns
         -------
         torch.Tensor
-            Sequences with randomly inserts segments of random DNA. All sequences
+            Sequences with randomly inserted segments of random DNA. All sequences
             are padded with random DNA to ensure same shape.
         """
         N, A, L = x.shape
-
         # If insert_max is 0, return original sequences without modification
         if self.insert_max <= 0:
             return x
@@ -152,19 +151,25 @@ class RandomInsertion(AugmentBase):
         # loop over each sequence
         x_aug = []
         for seq, insertion, insert_len, insert_ind in zip(x, insertions, insert_lens, insert_inds):
-            # Insert random DNA
-            augmented_seq = torch.cat([
-                seq[:, :insert_ind],
-                insertion[:, :insert_len],
-                seq[:, insert_ind:]
-            ], -1)
-            # Truncate equally from both ends
-            extra = augmented_seq.shape[-1] - L
-            if extra > 0:
-                trim_left = extra // 2
-                trim_right = extra - trim_left
-                augmented_seq = augmented_seq[:, trim_left:augmented_seq.shape[-1]-trim_right]
-            x_aug.append(augmented_seq)
+
+            # Insert the random DNA
+            inserted = torch.cat([seq[:, :insert_ind], insertion[:, :insert_len], seq[:, insert_ind:]], -1)
+
+            # Calculate how much to trim to get back to length L
+            current_len = inserted.shape[-1]
+            excess = current_len - L
+            
+            if excess > 0:
+                # Trim equally from both ends
+                trim_left = excess // 2
+                trim_right = excess - trim_left
+                final_seq = inserted[:, trim_left:current_len - trim_right]
+            else:
+                # No trimming needed
+                final_seq = inserted
+            
+            x_aug.append(final_seq)
+
         return torch.stack(x_aug)
 
 
@@ -294,6 +299,10 @@ class RandomMutation(AugmentBase):
 
         # determine the number of mutations per sequence
         num_mutations = round(self.mutate_frac / 0.75 * L) # num. mutations per sequence (accounting for silent mutations)
+
+        # If no mutations, return original sequences
+        if num_mutations <= 0:
+            return x
 
         # randomly determine the indices to apply mutations
         mutation_inds = torch.argsort(torch.rand(N,L))[:, :num_mutations] # see <https://discuss.pytorch.org/t/torch-equivalent-of-numpy-random-choice/16146>0
