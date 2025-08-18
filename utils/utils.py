@@ -197,48 +197,235 @@ class H5DataModule(pl.LightningDataModule):
 
 
 class H5Dataset(Dataset):
-    """Dataset class for H5 data files."""
+    """
+    Enhanced Dataset class for H5 data files with DataModule-like functionality.
     
-    def __init__(self, filepath, split='train', lower_case=False, transpose=False):
-        """
-        Initialize dataset from H5 file.
-        
-        Parameters:
-        -----------
-        filepath : str
-            Path to the H5 file
-        split : str
-            Data split to load ('train', 'val', 'test')
-        lower_case : bool
-            Whether to convert sequences to lowercase
-        transpose : bool
-            Whether to transpose the data
-        """
+    This class combines the functionality of a PyTorch Dataset with the convenience
+    methods of a Lightning DataModule, making it easy to integrate with EvoAug2
+    augmentations without nesting datamodules.
+    
+    Parameters
+    ----------
+    filepath : str
+        Path to the H5 file
+    batch_size : int, optional
+        Batch size for dataloaders. Defaults to 128.
+    lower_case : bool, optional
+        Whether to use lowercase keys ('x', 'y') instead of uppercase ('X', 'Y').
+        Defaults to False.
+    transpose : bool, optional
+        Whether to transpose the data dimensions. Defaults to False.
+    downsample : int, optional
+        Number of samples to use (for debugging). If None, uses all data.
+        Defaults to None.
+    """
+    
+    def __init__(self, filepath, batch_size=128, lower_case=False, transpose=False, downsample=None):
         self.filepath = filepath
-        self.split = split
+        self.batch_size = batch_size
         self.lower_case = lower_case
         self.transpose = transpose
+        self.downsample = downsample
         
-        # Load data
-        with h5py.File(filepath, 'r') as f:
-            if split == 'train':
-                self.x = torch.tensor(f['X_train'][:], dtype=torch.float32)
-                self.y = torch.tensor(f['Y_train'][:], dtype=torch.float32)
-            elif split == 'val':
-                self.x = torch.tensor(f['X_valid'][:], dtype=torch.float32)
-                self.y = torch.tensor(f['Y_valid'][:], dtype=torch.float32)
-            elif split == 'test':
-                self.x = torch.tensor(f['X_test'][:], dtype=torch.float32)
-                self.y = torch.tensor(f['Y_test'][:], dtype=torch.float32)
-            else:
-                raise ValueError(f"Unknown split: {split}")
+        # Set key names based on lower_case parameter
+        self.x_key = 'x' if lower_case else 'X'
+        self.y_key = 'y' if lower_case else 'Y'
         
-        # Transpose if needed
-        if self.transpose:
-            self.x = self.x.transpose(-1, -2)
+        # Initialize data attributes
+        self.x_train = None
+        self.y_train = None
+        self.x_valid = None
+        self.y_valid = None
+        self.x_test = None
+        self.y_test = None
+        
+        # Initialize shape attributes
+        self.A = None  # alphabet size (number of nucleotides)
+        self.L = None  # sequence length
+        self.num_classes = None
+        
+        # Load all data splits
+        self._load_all_data()
+    
+    def _load_all_data(self):
+        """Load all data splits from the H5 file."""
+        with h5py.File(self.filepath, 'r') as f:
+            # Load training data
+            x_train = np.array(f[f'{self.x_key}_train'][:], dtype=np.float32)
+            y_train = np.array(f[f'{self.y_key}_train'][:], dtype=np.float32)
+            
+            # Load validation data
+            x_valid = np.array(f[f'{self.x_key}_valid'][:], dtype=np.float32)
+            y_valid = np.array(f[f'{self.y_key}_valid'][:], dtype=np.float32)
+            
+            # Load test data
+            x_test = np.array(f[f'{self.x_key}_test'][:], dtype=np.float32)
+            y_test = np.array(f[f'{self.y_key}_test'][:], dtype=np.float32)
+            
+            # Apply downsampling if specified
+            if self.downsample:
+                x_train = x_train[:self.downsample]
+                y_train = y_train[:self.downsample]
+            
+            # Apply transpose if needed
+            if self.transpose:
+                x_train = np.transpose(x_train, (0, 2, 1))
+                x_valid = np.transpose(x_valid, (0, 2, 1))
+                x_test = np.transpose(x_test, (0, 2, 1))
+            
+            # Convert to tensors
+            self.x_train = torch.from_numpy(x_train)
+            self.y_train = torch.from_numpy(y_train)
+            self.x_valid = torch.from_numpy(x_valid)
+            self.y_valid = torch.from_numpy(y_valid)
+            self.x_test = torch.from_numpy(x_test)
+            self.y_test = torch.from_numpy(y_test)
+            
+            # Set shape attributes
+            _, self.A, self.L = self.x_train.shape
+            self.num_classes = self.y_train.shape[1]
+    
+    def setup(self, split='train'):
+        """
+        Set up the dataset for a specific split.
+        
+        This method is kept for backward compatibility but is no longer needed
+        as all data is loaded in __init__.
+        
+        Parameters
+        ----------
+        split : str, optional
+            Data split to use ('train', 'val', 'test'). Defaults to 'train'.
+            
+        Notes
+        -----
+        This method is deprecated. All data is now loaded automatically in __init__.
+        """
+        # For backward compatibility, set current split
+        if split == 'train':
+            self.x = self.x_train
+            self.y = self.y_train
+        elif split == 'val':
+            self.x = self.x_valid
+            self.y = self.y_valid
+        elif split == 'test':
+            self.x = self.x_test
+            self.y = self.y_test
+        else:
+            raise ValueError(f"Unknown split: {split}")
+    
+    def get_train_dataset(self):
+        """Get training dataset as TensorDataset.
+        
+        Returns
+        -------
+        torch.utils.data.TensorDataset
+            Training dataset with (x, y) pairs.
+        """
+        return TensorDataset(self.x_train, self.y_train)
+    
+    def get_val_dataset(self):
+        """Get validation dataset as TensorDataset.
+        
+        Returns
+        -------
+        torch.utils.data.TensorDataset
+            Validation dataset with (x, y) pairs.
+        """
+        return TensorDataset(self.x_valid, self.y_valid)
+    
+    def get_test_dataset(self):
+        """Get test dataset as TensorDataset.
+        
+        Returns
+        -------
+        torch.utils.data.TensorDataset
+            Test dataset with (x, y) pairs.
+        """
+        return TensorDataset(self.x_test, self.y_test)
+    
+    def train_dataloader(self):
+        """Get training dataloader.
+        
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Training dataloader with shuffling enabled.
+        """
+        train_dataset = self.get_train_dataset()
+        return DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+    
+    def val_dataloader(self):
+        """Get validation dataloader.
+        
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Validation dataloader with shuffling disabled.
+        """
+        valid_dataset = self.get_val_dataset()
+        return DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
+    
+    def test_dataloader(self):
+        """Get test dataloader.
+        
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Test dataloader with shuffling disabled.
+        """
+        test_dataset = self.get_test_dataset()
+        return DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
     
     def __len__(self):
-        return len(self.x)
+        """Return the number of samples in the current split.
+        
+        Returns
+        -------
+        int
+            Number of samples in the current split.
+        """
+        if hasattr(self, 'x'):
+            return len(self.x)
+        else:
+            # Default to training set length
+            return len(self.x_train)
     
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
+        """Get a single sample from the current split.
+        
+        Parameters
+        ----------
+        idx : int
+            Index of the sample to retrieve.
+            
+        Returns
+        -------
+        tuple
+            (x, y) pair where x is the sequence and y is the target.
+        """
+        if hasattr(self, 'x'):
+            return self.x[idx], self.y[idx]
+        else:
+            # Default to training set
+            return self.x_train[idx], self.y_train[idx]
+    
+    @property
+    def train_size(self):
+        """Number of training samples."""
+        return len(self.x_train)
+    
+    @property
+    def val_size(self):
+        """Number of validation samples."""
+        return len(self.x_valid)
+    
+    @property
+    def test_size(self):
+        """Number of test samples."""
+        return len(self.x_test)
+    
+    @property
+    def total_size(self):
+        """Total number of samples across all splits."""
+        return self.train_size + self.val_size + self.test_size

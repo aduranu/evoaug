@@ -16,7 +16,7 @@ from evoaug.augment import (
     RandomDeletion, RandomRC, RandomInsertion,
     RandomTranslocation, RandomMutation, RandomNoise
 )
-from evoaug.evoaug2 import RobustLoader
+from evoaug.evoaug import RobustLoader
 from utils.model_zoo import DeepSTARRModel, DeepSTARR
 from utils import utils
 from scipy import stats
@@ -98,53 +98,53 @@ def main():
     # Create Lightning model
     model = DeepSTARRModel(deepstarr, learning_rate=0.001, weight_decay=1e-6)
     
-    # Create base data module
-    base_data_module = utils.H5DataModule(filepath, batch_size=batch_size, lower_case=False, transpose=False)
+    # Create enhanced H5Dataset (now includes DataModule-like functionality)
+    base_dataset = utils.H5Dataset(filepath, batch_size=batch_size, lower_case=False, transpose=False)
     
     # Create augmented data module for Stage 1 training
     class AugmentedDataModule(pl.LightningDataModule):
-        def __init__(self, base_module, augment_list, max_augs_per_seq, hard_aug):
+        def __init__(self, base_dataset, augment_list, max_augs_per_seq, hard_aug):
             super().__init__()
-            self.base_module = base_module
+            self.base_dataset = base_dataset
             self.augment_list = augment_list
             self.max_augs_per_seq = max_augs_per_seq
             self.hard_aug = hard_aug
             
         def train_dataloader(self):
-            # Use RobustLoader directly - it's now a proper DataLoader
-            base_dataset = self.base_module.train_dataloader().dataset
+            # Use RobustLoader with training dataset
+            train_dataset = self.base_dataset.get_train_dataset()
             return RobustLoader(
-                base_dataset=base_dataset,
+                base_dataset=train_dataset,
                 augment_list=self.augment_list,
                 max_augs_per_seq=self.max_augs_per_seq,
                 hard_aug=self.hard_aug,
-                batch_size=self.base_module.batch_size,
+                batch_size=self.base_dataset.batch_size,
                 shuffle=True
             )
         
         def val_dataloader(self):
-            # Wrap validation dataset in RobustLoader and disable augmentations
-            base_dataset = self.base_module.val_dataloader().dataset
+            # Use RobustLoader with validation dataset and disable augmentations
+            val_dataset = self.base_dataset.get_val_dataset()
             loader = RobustLoader(
-                base_dataset=base_dataset,
+                base_dataset=val_dataset,
                 augment_list=self.augment_list,
                 max_augs_per_seq=self.max_augs_per_seq,
                 hard_aug=self.hard_aug,
-                batch_size=self.base_module.batch_size,
+                batch_size=self.base_dataset.batch_size,
                 shuffle=False
             )
             loader.disable_augmentations()
             return loader
         
         def test_dataloader(self):
-            # Wrap test dataset in RobustLoader and disable augmentations
-            base_dataset = self.base_module.test_dataloader().dataset
+            # Use RobustLoader with test dataset and disable augmentations
+            test_dataset = self.base_dataset.get_test_dataset()
             loader = RobustLoader(
-                base_dataset=base_dataset,
+                base_dataset=test_dataset,
                 augment_list=self.augment_list,
                 max_augs_per_seq=self.max_augs_per_seq,
                 hard_aug=self.hard_aug,
-                batch_size=self.base_module.batch_size,
+                batch_size=self.base_dataset.batch_size,
                 shuffle=False
             )
             loader.disable_augmentations()
@@ -152,7 +152,7 @@ def main():
     
     # Create augmented data module for Stage 1
     data_module = AugmentedDataModule(
-        base_data_module, 
+        base_dataset, 
         augment_list, 
         max_augs_per_seq=2,  # DeepSTARR optimal: maximum 2 augmentations per sequence
         hard_aug=True         # DeepSTARR uses hard setting: always apply exactly 2 augmentations
@@ -200,11 +200,11 @@ def main():
         # Get predictions
         # Note: For models with insertion augmentation, sequences are padded at 3' end with random DNA
         # This is handled automatically by the RobustLoader during training
-        pred = utils.get_predictions(model, data_module.test_dataloader().dataset.x, batch_size=batch_size)
-        results = utils.evaluate_model(data_module.test_dataloader().dataset.y, pred, task='regression')
+        pred = utils.get_predictions(model, base_dataset.x_test, batch_size=batch_size)
+        results = utils.evaluate_model(base_dataset.y_test, pred, task='regression')
         
         # Print correlation metrics
-        y_true = data_module.y_test
+        y_true = base_dataset.y_test
         y_score = pred
         
         print('Pearson r')
@@ -238,7 +238,22 @@ def main():
         return
     
     # Create data module without augmentations for fine-tuning
-    data_module_finetune = utils.H5DataModule(filepath, batch_size=batch_size, lower_case=False, transpose=False)
+    # Use the same base_dataset but create a simple DataModule for fine-tuning
+    class FineTuneDataModule(pl.LightningDataModule):
+        def __init__(self, base_dataset):
+            super().__init__()
+            self.base_dataset = base_dataset
+            
+        def train_dataloader(self):
+            return self.base_dataset.train_dataloader()
+            
+        def val_dataloader(self):
+            return self.base_dataset.val_dataloader()
+            
+        def test_dataloader(self):
+            return self.base_dataset.test_dataloader()
+    
+    data_module_finetune = FineTuneDataModule(base_dataset)
     
     # Create trainer for fine-tuning
     ckpt_finetune_path = expt_name + "_finetune"
@@ -277,11 +292,11 @@ def main():
         
         # Get predictions
         # Note: Fine-tuned model is evaluated on original, unperturbed sequences
-        pred_finetune = utils.get_predictions(model_finetune, data_module_finetune.test_dataloader().dataset.x, batch_size=batch_size)
-        results_finetune = utils.evaluate_model(data_module_finetune.test_dataloader().dataset.y, pred_finetune, task='regression')
+        pred_finetune = utils.get_predictions(model_finetune, base_dataset.x_test, batch_size=batch_size)
+        results_finetune = utils.evaluate_model(base_dataset.y_test, pred_finetune, task='regression')
         
         # Print correlation metrics
-        y_true_finetune = data_module_finetune.y_test
+        y_true_finetune = base_dataset.y_test
         y_score_finetune = pred_finetune
         
         print('Fine-tuned Pearson r')
@@ -306,8 +321,8 @@ def main():
     deepstarr_control = DeepSTARR(2)
     model_control = DeepSTARRModel(deepstarr_control, learning_rate=0.001, weight_decay=1e-6)
     
-    # Create data module without augmentations (original data only)
-    data_module_control = utils.H5DataModule(filepath, batch_size=batch_size, lower_case=False, transpose=False)
+    # Use the same base_dataset for control training
+    data_module_control = FineTuneDataModule(base_dataset)
     
     # Create trainer for control
     ckpt_control_path = expt_name + "_standard"
@@ -347,11 +362,11 @@ def main():
         
         # Get predictions
         # Note: Control model is evaluated on original, unperturbed sequences
-        pred_control = utils.get_predictions(model_control, data_module_control.test_dataloader().dataset.x, batch_size=batch_size)
-        results_control = utils.evaluate_model(data_module_control.test_dataloader().dataset.y, pred_control, task='regression')
+        pred_control = utils.get_predictions(model_control, base_dataset.x_test, batch_size=batch_size)
+        results_control = utils.evaluate_model(base_dataset.y_test, pred_control, task='regression')
         
         # Print correlation metrics
-        y_true_control = data_module_control.y_test
+        y_true_control = base_dataset.y_test
         y_score_control = pred_control
         
         print('Control Pearson r')
