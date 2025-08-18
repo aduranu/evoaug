@@ -1,15 +1,54 @@
-# From evoaug_analysis.git by p-koo
+"""
+Model definitions and PyTorch Lightning modules for EvoAug2.
+
+This module provides the DeepSTARR model architecture and PyTorch Lightning
+wrappers for training with EvoAug2 augmentations.
+"""
 
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-
+import numpy as np
 
 
 class DeepSTARR(nn.Module):
-    """DeepSTARR model from de Almeida et al., 2022;
-        see <https://www.nature.com/articles/s41588-022-01048-5>
     """
+    DeepSTARR model from de Almeida et al., 2022.
+    
+    This is the original DeepSTARR model architecture as described in the paper.
+    See https://www.nature.com/articles/s41588-022-01048-5 for details.
+    
+    Parameters
+    ----------
+    output_dim : int
+        Number of output classes for prediction.
+    d : int, optional
+        Number of first-layer convolutional filters. Defaults to 256.
+    conv1_filters : torch.Tensor, optional
+        Initial filters for the first convolutional layer. If None, random filters are initialized.
+    learn_conv1_filters : bool, optional
+        Whether to learn the first convolutional filters. Defaults to True.
+    conv2_filters : torch.Tensor, optional
+        Initial filters for the second convolutional layer. If None, random filters are initialized.
+    learn_conv2_filters : bool, optional
+        Whether to learn the second convolutional filters. Defaults to True.
+    conv3_filters : torch.Tensor, optional
+        Initial filters for the third convolutional layer. If None, random filters are initialized.
+    learn_conv3_filters : bool, optional
+        Whether to learn the third convolutional filters. Defaults to True.
+    conv4_filters : torch.Tensor, optional
+        Initial filters for the fourth convolutional layer. If None, random filters are initialized.
+    learn_conv4_filters : bool, optional
+        Whether to learn the fourth convolutional filters. Defaults to True.
+        
+    Notes
+    -----
+    - The original DeepSTARR model uses 256 first-layer convolutional filters
+    - Supports transfer learning by initializing with pre-trained filters
+    - Uses batch normalization and max pooling throughout
+    - Final layers use LazyLinear for automatic input size inference
+    """
+    
     def __init__(self, output_dim, d=256,
                  conv1_filters=None, learn_conv1_filters=True,
                  conv2_filters=None, learn_conv2_filters=True,
@@ -95,6 +134,19 @@ class DeepSTARR(nn.Module):
         self.fc7 = nn.Linear(256, output_dim)
 
     def get_which_conv_layers_transferred(self):
+        """
+        Get list of convolutional layers that were initialized with pre-trained filters.
+        
+        Returns
+        -------
+        list
+            List of layer indices (1-4) that were initialized with pre-trained filters.
+            
+        Notes
+        -----
+        This method is useful for understanding which layers were transferred
+        from a pre-trained model during initialization.
+        """
         layers = []
         if self.init_conv1_filters is not None:
             layers.append(1)
@@ -107,6 +159,27 @@ class DeepSTARR(nn.Module):
         return layers
 
     def forward(self, x):
+        """
+        Forward pass through the DeepSTARR model.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (batch_size, 4, sequence_length).
+            
+        Returns
+        -------
+        torch.Tensor
+            Output predictions with shape (batch_size, output_dim).
+            
+        Notes
+        -----
+        The forward pass applies:
+        1. Four sequential 1D convolutions with batch normalization and max pooling
+        2. Flattening of convolutional features
+        3. Two fully connected layers with batch normalization and dropout
+        4. Final output layer for predictions
+        """
         # Layer 1
         cnn = torch.conv1d(x, self.conv1_filters, stride=1, padding="same")
         cnn = self.batchnorm1(cnn)
@@ -154,7 +227,28 @@ class DeepSTARR(nn.Module):
 
 
 class DeepSTARRModel(pl.LightningModule):
-    """PyTorch Lightning module for DeepSTARR training"""
+    """
+    PyTorch Lightning module for DeepSTARR training.
+    
+    This class wraps the DeepSTARR model in a PyTorch Lightning module,
+    providing training, validation, and testing functionality with
+    automatic logging and checkpointing.
+    
+    Parameters
+    ----------
+    model : DeepSTARR
+        The DeepSTARR model instance.
+    learning_rate : float, optional
+        Learning rate for training. Defaults to 0.001.
+    weight_decay : float, optional
+        Weight decay (L2 regularization). Defaults to 1e-6.
+        
+    Notes
+    -----
+    - Uses MSE loss for regression tasks
+    - Adam optimizer with ReduceLROnPlateau scheduler
+    - Automatic logging of training, validation, and test losses
+    """
     
     def __init__(self, model, learning_rate=0.001, weight_decay=1e-6):
         super().__init__()
@@ -164,9 +258,37 @@ class DeepSTARRModel(pl.LightningModule):
         self.criterion = nn.MSELoss()
         
     def forward(self, x):
+        """
+        Forward pass through the model.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+            
+        Returns
+        -------
+        torch.Tensor
+            Model predictions.
+        """
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
+        """
+        Training step for a single batch.
+        
+        Parameters
+        ----------
+        batch : tuple
+            Tuple of (x, y) where x is input and y is target.
+        batch_idx : int
+            Index of the current batch.
+            
+        Returns
+        -------
+        torch.Tensor
+            Training loss for the batch.
+        """
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
@@ -174,6 +296,21 @@ class DeepSTARRModel(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for a single batch.
+        
+        Parameters
+        ----------
+        batch : tuple
+            Tuple of (x, y) where x is input and y is target.
+        batch_idx : int
+            Index of the current batch.
+            
+        Returns
+        -------
+        torch.Tensor
+            Validation loss for the batch.
+        """
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
@@ -181,6 +318,21 @@ class DeepSTARRModel(pl.LightningModule):
         return loss
     
     def test_step(self, batch, batch_idx):
+        """
+        Test step for a single batch.
+        
+        Parameters
+        ----------
+        batch : tuple
+            Tuple of (x, y) where x is input and y is target.
+        batch_idx : int
+            Index of the current batch.
+            
+        Returns
+        -------
+        torch.Tensor
+            Test loss for the batch.
+        """
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
@@ -188,6 +340,20 @@ class DeepSTARRModel(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
+        """
+        Configure optimizer and learning rate scheduler.
+        
+        Returns
+        -------
+        dict
+            Dictionary with optimizer and scheduler configuration.
+            
+        Notes
+        -----
+        Uses Adam optimizer with ReduceLROnPlateau scheduler.
+        The scheduler monitors validation loss and reduces learning rate
+        when no improvement is seen for 5 epochs.
+        """
         optimizer = torch.optim.Adam(
             self.parameters(),
             lr=self.learning_rate,
@@ -210,10 +376,41 @@ class DeepSTARRModel(pl.LightningModule):
 
 
 class Basset(nn.Module):
-    """Basset model from Kelley et al., 2016; 
-        see <https://genome.cshlp.org/content/early/2016/05/03/gr.200535.115.abstract>
-        and <https://github.com/davek44/Basset/blob/master/data/models/pretrained_params.txt>
     """
+    Basset model from Kelley et al., 2016.
+    
+    This is the Basset model architecture as described in the original paper.
+    See https://genome.cshlp.org/content/early/2016/05/03/gr.200535.115.abstract
+    and https://github.com/davek44/Basset/blob/master/data/models/pretrained_params.txt
+    
+    Parameters
+    ----------
+    output_dim : int
+        Number of output classes for prediction.
+    d : int, optional
+        Number of first-layer convolutional filters. Defaults to 300.
+    conv1_filters : torch.Tensor, optional
+        Initial filters for the first convolutional layer. If None, random filters are initialized.
+    learn_conv1_filters : bool, optional
+        Whether to learn the first convolutional filters. Defaults to True.
+    conv2_filters : torch.Tensor, optional
+        Initial filters for the second convolutional layer. If None, random filters are initialized.
+    learn_conv2_filters : bool, optional
+        Whether to learn the second convolutional filters. Defaults to True.
+    conv3_filters : torch.Tensor, optional
+        Initial filters for the third convolutional layer. If None, random filters are initialized.
+    learn_conv3_filters : bool, optional
+        Whether to learn the third convolutional filters. Defaults to True.
+        
+    Notes
+    -----
+    - The original Basset model uses 300 first-layer convolutional filters
+    - Supports transfer learning by initializing with pre-trained filters
+    - Uses batch normalization and max pooling throughout
+    - Final layers use LazyLinear for automatic input size inference
+    - Output uses sigmoid activation for binary classification
+    """
+    
     def __init__(self, output_dim, d=300, 
                  conv1_filters=None, learn_conv1_filters=True,
                  conv2_filters=None, learn_conv2_filters=True,
@@ -285,6 +482,19 @@ class Basset(nn.Module):
         self.sigmoid = nn.Sigmoid()
     
     def get_which_conv_layers_transferred(self):
+        """
+        Get list of convolutional layers that were initialized with pre-trained filters.
+        
+        Returns
+        -------
+        list
+            List of layer indices (1-3) that were initialized with pre-trained filters.
+            
+        Notes
+        -----
+        This method is useful for understanding which layers were transferred
+        from a pre-trained model during initialization.
+        """
         layers = []
         if self.init_conv1_filters is not None:
             layers.append(1)
@@ -295,6 +505,27 @@ class Basset(nn.Module):
         return layers
     
     def forward(self, x):
+        """
+        Forward pass through the Basset model.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (batch_size, 4, sequence_length).
+            
+        Returns
+        -------
+        torch.Tensor
+            Output predictions with shape (batch_size, output_dim).
+            
+        Notes
+        -----
+        The forward pass applies:
+        1. Three sequential 1D convolutions with batch normalization and max pooling
+        2. Flattening of convolutional features
+        3. Two fully connected layers with batch normalization and dropout
+        4. Final output layer with sigmoid activation
+        """
         # Layer 1
         cnn = torch.conv1d(x, self.conv1_filters, stride=1, padding=(self.conv1_filters.shape[-1]//2))
         cnn = self.batchnorm1(cnn)
@@ -333,8 +564,26 @@ class Basset(nn.Module):
         return y_pred
 
 
-
 class CNN(nn.Module):
+    """
+    Generic CNN model for genomic sequence classification.
+    
+    This is a flexible CNN architecture that can be used for various
+    genomic sequence classification tasks.
+    
+    Parameters
+    ----------
+    output_dim : int
+        Number of output classes for prediction.
+        
+    Notes
+    -----
+    - Uses three convolutional layers with batch normalization and max pooling
+    - Includes dropout for regularization
+    - Final layers use LazyLinear for automatic input size inference
+    - Output uses sigmoid activation for binary classification
+    """
+    
     def __init__(self, output_dim):
         super().__init__()
         
@@ -373,6 +622,28 @@ class CNN(nn.Module):
         self.fc5 = nn.LazyLinear(output_dim, bias=True)
     
     def forward(self, x):
+        """
+        Forward pass through the CNN model.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (batch_size, 4, sequence_length).
+            
+        Returns
+        -------
+        torch.Tensor
+            Output predictions with shape (batch_size, output_dim).
+            
+        Notes
+        -----
+        The forward pass applies:
+        1. Three sequential 1D convolutions with batch normalization and max pooling
+        2. Dropout after each convolutional layer
+        3. Flattening of convolutional features
+        4. Fully connected layer with batch normalization and dropout
+        5. Final output layer with sigmoid activation
+        """
         # Layer 1
         cnn = torch.conv1d(x, self.conv1_filters, stride=1, padding="same")
         cnn = self.batchnorm1(cnn)
