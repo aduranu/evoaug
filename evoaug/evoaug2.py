@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from typing import List, Optional, Tuple, Union
-from evoaug.augment_prev import AugmentBase
+from evoaug.augment import AugmentBase
 
 
 class AugmentedGenomicDataset(Dataset):
@@ -69,9 +69,9 @@ class AugmentedGenomicDataset(Dataset):
         # Apply augmentations if enabled
         if self.apply_augmentations and self.augment_list:
             sequence = self._apply_augmentations(sequence)
-        elif self.insert_max > 0:
-            # If no augmentations but we need padding for consistency
-            sequence = self._pad_end(sequence)
+        # elif self.insert_max > 0:
+        #     # If no augmentations but we need padding for consistency
+        #     sequence = self._pad_end(sequence)
             
         if target is not None:
             return sequence, target
@@ -120,9 +120,9 @@ class AugmentedGenomicDataset(Dataset):
             if hasattr(self.augment_list[aug_index], 'insert_max'):
                 insert_status = False
                 
-        # Add padding if needed
-        if insert_status and self.insert_max > 0:
-            sequence = self._pad_end(sequence)
+        # # Add padding only if no insertion augmentations were applied AND augmentations are enabled
+        # if insert_status and self.insert_max > 0 and self.apply_augmentations:
+        #     sequence = self._pad_end(sequence)
             
         return sequence.squeeze(0)  # Remove batch dimension
     
