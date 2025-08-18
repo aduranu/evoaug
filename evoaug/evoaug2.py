@@ -2,17 +2,17 @@
 EvoAug2: PyTorch DataLoader implementation of EvoAug functionality.
 
 This module provides the same augmentation capabilities as RobustModel but
-as a standalone PyTorch Dataset/DataLoader that can be used with any model.
+as a standalone PyTorch DataLoader that can be used with any model.
 
-NOTE: should include callbacks??
-
+The RobustLoader inherits from DataLoader and can be used directly in
+PyTorch Lightning DataModules or vanilla PyTorch training loops.
 """
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from typing import List, Optional, Tuple, Union
-from evoaug.augment import AugmentBase
+from evoaug.augment_prev import AugmentBase
 
 
 class AugmentedGenomicDataset(Dataset):
@@ -155,17 +155,17 @@ class AugmentedGenomicDataset(Dataset):
         self.apply_augmentations = False
 
 
-class RobustLoader:
+class RobustLoader(DataLoader):
     """
-    Convenience class that combines AugmentedGenomicDataset with DataLoader.
+    EvoAug2 DataLoader that inherits from PyTorch DataLoader.
     
-    This provides a simple interface similar to the original RobustModel but
-    as a data loader that can be used with any PyTorch model.
+    This class provides a DataLoader with built-in EvoAug augmentations that can be
+    used directly in PyTorch Lightning DataModules or vanilla PyTorch training loops.
     
     Parameters
     ----------
     base_dataset : torch.utils.data.Dataset
-        The underlying dataset.
+        The underlying dataset that provides (sequence, target) pairs.
     augment_list : List[AugmentBase]
         List of augmentations to apply.
     max_augs_per_seq : int, optional
@@ -189,9 +189,10 @@ class RobustLoader:
                  hard_aug: bool = True,
                  batch_size: int = 32,
                  shuffle: bool = True,
-                 num_workers: int = 0,
+                 num_workers: int = 4,
                  **kwargs):
         
+        # Create the augmented dataset
         self.augmented_dataset = AugmentedGenomicDataset(
             base_dataset=base_dataset,
             augment_list=augment_list,
@@ -200,24 +201,27 @@ class RobustLoader:
             apply_augmentations=True
         )
         
-        self.dataloader = DataLoader(
-            self.augmented_dataset,
+        # Initialize the parent DataLoader with the augmented dataset
+        super().__init__(
+            dataset=self.augmented_dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
             **kwargs
         )
     
-    def __iter__(self):
-        return iter(self.dataloader)
-    
-    def __len__(self):
-        return len(self.dataloader)
-    
     def enable_augmentations(self):
-        """Enable augmentations."""
+        """Enable augmentations (for training)."""
         self.augmented_dataset.enable_augmentations()
     
     def disable_augmentations(self):
-        """Disable augmentations (for finetuning)."""
+        """Disable augmentations (for finetuning/validation)."""
         self.augmented_dataset.disable_augmentations()
+    
+    def set_augmentations(self, augment_list: List[AugmentBase], max_augs_per_seq: int = 0, hard_aug: bool = True):
+        """Update the augmentation settings."""
+        self.augmented_dataset.augment_list = augment_list
+        self.augmented_dataset.max_augs_per_seq = min(max_augs_per_seq, len(augment_list))
+        self.augmented_dataset.hard_aug = hard_aug
+        self.augmented_dataset.max_num_aug = len(augment_list)
+        self.augmented_dataset.insert_max = self.augmented_dataset._get_insert_max()
