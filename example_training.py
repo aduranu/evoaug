@@ -561,25 +561,30 @@ def main():
         y_true = base_dataset.y_test
         y_score = pred
         
-        print('Pearson r')
-        vals = []
-        for class_index in range(y_true.shape[-1]):
-            vals.append(stats.pearsonr(y_true[:,class_index], y_score[:,class_index])[0])
-        pearson_aug = np.array(vals)
-        print(pearson_aug)
-        
-        print('Spearman rho')
-        vals = []
-        for class_index in range(y_true.shape[-1]):
-            vals.append(stats.spearmanr(y_true[:,class_index], y_score[:,class_index])[0])
-        spearman_aug = np.array(vals)
-        print(spearman_aug)
-        
-        # Store metrics for plotting
-        metrics_data['augmented'] = {
-            'pearson_r': pearson_aug,
-            'spearman_r': spearman_aug
-        }
+        if y_true is not None and y_score is not None:
+            print('Pearson r')
+            vals = []
+            for class_index in range(y_true.shape[-1]):
+                vals.append(stats.pearsonr(y_true[:,class_index], y_score[:,class_index])[0])
+            pearson_aug = np.array(vals)
+            print(pearson_aug)
+            
+            print('Spearman rho')
+            vals = []
+            for class_index in range(y_true.shape[-1]):
+                vals.append(stats.pearsonr(y_true[:,class_index], y_score[:,class_index])[0])
+            spearman_r = np.array(vals)
+            print(spearman_r)
+            
+            # Store metrics for plotting
+            metrics_data['augmented'] = {
+                'pearson_r': pearson_aug,
+                'spearman_r': spearman_r
+            }
+        else:
+            print("Warning: Could not compute metrics - y_true or y_score is None")
+            pearson_aug = np.array([])
+            spearman_r = np.array([])
     
     # STAGE 2: Fine-tuning on Original Data
     print("\n=== Stage 2: Fine-tuning on Original Data ===")
@@ -678,25 +683,30 @@ def main():
         y_true_finetune = base_dataset.y_test
         y_score_finetune = pred_finetune
         
-        print('Fine-tuned Pearson r')
-        vals = []
-        for class_index in range(y_true_finetune.shape[-1]):
-            vals.append(stats.pearsonr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
-        pearson_finetune = np.array(vals)
-        print(pearson_finetune)
-        
-        print('Fine-tuned Spearman rho')
-        vals = []
-        for class_index in range(y_true_finetune.shape[-1]):
-            vals.append(stats.spearmanr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
-        spearman_finetune = np.array(vals)
-        print(spearman_finetune)
-        
-        # Store metrics for plotting
-        metrics_data['finetuned'] = {
-            'pearson_r': pearson_finetune,
-            'spearman_r': spearman_finetune
-        }
+        if y_true_finetune is not None and y_score_finetune is not None:
+            print('Fine-tuned Pearson r')
+            vals = []
+            for class_index in range(y_true_finetune.shape[-1]):
+                vals.append(stats.pearsonr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
+            pearson_finetune = np.array(vals)
+            print(pearson_finetune)
+            
+            print('Fine-tuned Spearman rho')
+            vals = []
+            for class_index in range(y_true_finetune.shape[-1]):
+                vals.append(stats.spearmanr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
+            spearman_finetune = np.array(vals)
+            print(spearman_finetune)
+            
+            # Store metrics for plotting
+            metrics_data['finetuned'] = {
+                'pearson_r': pearson_finetune,
+                'spearman_r': spearman_finetune
+            }
+        else:
+            print("Warning: Could not compute fine-tuned metrics - y_true or y_score is None")
+            pearson_finetune = np.array([])
+            spearman_finetune = np.array([])
     else:
         print("✗ ERROR: Fine-tuned model was not saved!")
     
@@ -774,25 +784,30 @@ def main():
         y_true_control = base_dataset.y_test
         y_score_control = pred_control
         
-        print('Control Pearson r')
-        vals = []
-        for class_index in range(y_true_control.shape[-1]):
-            vals.append(stats.pearsonr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
-        pearson_control = np.array(vals)
-        print(pearson_control)
-        
-        print('Fine-tuned Spearman rho')
-        vals = []
-        for class_index in range(y_true_control.shape[-1]):
-            vals.append(stats.spearmanr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
-        spearman_control = np.array(vals)
-        print(spearman_control)
-        
-        # Store metrics for plotting
-        metrics_data['control'] = {
-            'pearson_r': pearson_control,
-            'spearman_r': spearman_control
-        }
+        if y_true_control is not None and y_score_control is not None:
+            print('Control Pearson r')
+            vals = []
+            for class_index in range(y_true_control.shape[-1]):
+                vals.append(stats.pearsonr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
+            pearson_control = np.array(vals)
+            print(pearson_control)
+            
+            print('Control Spearman rho')
+            vals = []
+            for class_index in range(y_true_control.shape[-1]):
+                vals.append(stats.spearmanr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
+            spearman_control = np.array(vals)
+            print(spearman_control)
+            
+            # Store metrics for plotting
+            metrics_data['control'] = {
+                'pearson_r': pearson_control,
+                'spearman_r': spearman_control
+            }
+        else:
+            print("Warning: Could not compute control metrics - y_true or y_score is None")
+            pearson_control = np.array([])
+            spearman_control = np.array([])
     
     print("=== All training completed ===")
     
