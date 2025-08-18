@@ -270,7 +270,7 @@ def main():
     # Define augmentations using optimal DeepSTARR hyperparameters from hyperparameter search
     # Based on Additional file 1: Figs. S1, S3, and S4 from the paper
     augment_list = [
-        RandomDeletion(delete_min=0, delete_max=30),      # DeepSTARR optimal: delete_max = 30
+        #RandomDeletion(delete_min=0, delete_max=30),      # DeepSTARR optimal: delete_max = 30
         RandomTranslocation(shift_min=0, shift_max=20),   # DeepSTARR optimal: shift_max = 20
         RandomInsertion(insert_min=0, insert_max=20),     # DeepSTARR optimal: insert_max = 20
         RandomRC(rc_prob=0.0),                           # DeepSTARR optimal: rc_prob = 0 (no reverse-complement)
@@ -412,8 +412,8 @@ def main():
         # Get predictions
         # Note: For models with insertion augmentation, sequences are padded at 3' end with random DNA
         # This is handled automatically by the RobustLoader during training
-        pred = utils.get_predictions(model, data_module.x_test, batch_size=batch_size)
-        results = utils.evaluate_model(data_module.y_test, pred, task='regression')
+        pred = utils.get_predictions(model, data_module.test_dataloader().dataset.x, batch_size=batch_size)
+        results = utils.evaluate_model(data_module.test_dataloader().dataset.y, pred, task='regression')
         
         # Print correlation metrics
         y_true = data_module.y_test
@@ -489,8 +489,8 @@ def main():
         
         # Get predictions
         # Note: Fine-tuned model is evaluated on original, unperturbed sequences
-        pred_finetune = utils.get_predictions(model_finetune, data_module_finetune.x_test, batch_size=batch_size)
-        results_finetune = utils.evaluate_model(data_module_finetune.y_test, pred_finetune, task='regression')
+        pred_finetune = utils.get_predictions(model_finetune, data_module_finetune.test_dataloader().dataset.x, batch_size=batch_size)
+        results_finetune = utils.evaluate_model(data_module_finetune.test_dataloader().dataset.y, pred_finetune, task='regression')
         
         # Print correlation metrics
         y_true_finetune = data_module_finetune.y_test
@@ -559,8 +559,8 @@ def main():
         
         # Get predictions
         # Note: Control model is evaluated on original, unperturbed sequences
-        pred_control = utils.get_predictions(model_control, data_module_control.x_test, batch_size=batch_size)
-        results_control = utils.evaluate_model(data_module_control.y_test, pred_control, task='regression')
+        pred_control = utils.get_predictions(model_control, data_module_control.test_dataloader().dataset.x, batch_size=batch_size)
+        results_control = utils.evaluate_model(data_module_control.test_dataloader().dataset.y, pred_control, task='regression')
         
         # Print correlation metrics
         y_true_control = data_module_control.y_test
