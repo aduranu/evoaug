@@ -1,6 +1,9 @@
 """
 Library of data augmentations for genomic sequence data.
 
+This module provides evolution-inspired data augmentation techniques for genomic sequences,
+ensuring that all augmentations preserve the input sequence length L.
+
 To contribute a custom augmentation, use the following syntax:
 
 .. code-block:: python
@@ -22,35 +25,60 @@ import torch
 class AugmentBase:
     """
     Base class for EvoAug augmentations for genomic sequences.
+    
+    All augmentation classes should inherit from this base class and implement
+    the :meth:`__call__` method to ensure consistent interface.
     """
+    
     def __call__(self, x):
         """Return an augmented version of `x`.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L) where:
+            - N is the batch size
+            - A is the number of nucleotides (4 for DNA)
+            - L is the sequence length
 
         Returns
         -------
         torch.Tensor
             Batch of one-hot sequences with random augmentation applied.
+            Output shape must be (N, A, L) to maintain sequence length consistency.
+
+        Raises
+        ------
+        NotImplementedError
+            If the augmentation class does not implement this method.
         """
         raise NotImplementedError()
 
 
 class RandomDeletion(AugmentBase):
-    """Randomly deletes a contiguous stretch of nucleotides from sequences in a training
-    batch according to a random number between a user-defined delete_min and delete_max.
-    A different deletion is applied to each sequence.
+    """
+    Randomly deletes contiguous stretches of nucleotides from sequences.
+    
+    This augmentation randomly selects deletion lengths and positions for each sequence
+    in a batch, then pads the deleted regions with random DNA to maintain the original
+    sequence length L.
 
     Parameters
     ----------
     delete_min : int, optional
-        Minimum size for random deletion (defaults to 0).
+        Minimum size for random deletion. Defaults to 0.
     delete_max : int, optional
-        Maximum size for random deletion (defaults to 20).
+        Maximum size for random deletion. Defaults to 20.
+        
+    Notes
+    -----
+    - Deletion positions are constrained to ensure the deletion window fits within
+      the sequence boundaries
+    - Random DNA padding is added equally to both ends of the deletion to maintain
+      sequence length L
+    - Each sequence in the batch receives a different random deletion
     """
+    
     def __init__(self, delete_min=0, delete_max=20):
         self.delete_min = delete_min
         self.delete_max = delete_max
@@ -61,13 +89,13 @@ class RandomDeletion(AugmentBase):
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with randomly deleted segments (padded to correct shape
-            with random DNA)
+            Sequences with randomly deleted segments, padded with random DNA
+            to maintain shape (N, A, L).
         """
         N, A, L = x.shape
 
@@ -102,35 +130,46 @@ class RandomDeletion(AugmentBase):
 
 
 class RandomInsertion(AugmentBase):
-    """Randomly inserts a contiguous stretch of nucleotides from sequences in a training
-    batch according to a random number between a user-defined insert_min and insert_max.
-    A different insertions is applied to each sequence. Each sequence is padded with random
-    DNA to ensure same shapes.
+    """
+    Randomly inserts contiguous stretches of random DNA into sequences.
+    
+    This augmentation randomly selects insertion lengths and positions for each sequence
+    in a batch, then trims the resulting sequences equally from both ends to maintain
+    the original sequence length L.
 
     Parameters
     ----------
     insert_min : int, optional
-        Minimum size for random insertion, defaults to 0
+        Minimum size for random insertion. Defaults to 0.
     insert_max : int, optional
-        Maximum size for random insertion, defaults to 20
+        Maximum size for random insertion. Defaults to 20.
+        
+    Notes
+    -----
+    - Insertion positions are randomly selected across the sequence length
+    - Random DNA is generated using uniform nucleotide distribution
+    - After insertion, sequences are trimmed equally from both ends to maintain
+      sequence length L
+    - Each sequence in the batch receives a different random insertion
     """
+    
     def __init__(self, insert_min=0, insert_max=20):
         self.insert_min = insert_min
         self.insert_max = insert_max
-
+    
     def __call__(self, x):
-        """Randomly inserts segments of random DNA to a set of DNA sequences.
+        """Randomly insert segments of random DNA into DNA sequences.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with randomly inserted segments of random DNA. All sequences
-            are padded with random DNA to ensure same shape.
+            Sequences with randomly inserted segments of random DNA, trimmed
+            to maintain shape (N, A, L).
         """
         N, A, L = x.shape
         # If insert_max is 0, return original sequences without modification
@@ -151,10 +190,13 @@ class RandomInsertion(AugmentBase):
         # loop over each sequence
         x_aug = []
         for seq, insertion, insert_len, insert_ind in zip(x, insertions, insert_lens, insert_inds):
-
+            # Convert to Python integers for safe indexing
+            il = insert_len.item()
+            ii = insert_ind.item()
+            
             # Insert the random DNA
-            inserted = torch.cat([seq[:, :insert_ind], insertion[:, :insert_len], seq[:, insert_ind:]], -1)
-
+            inserted = torch.cat([seq[:, :ii], insertion[:, :il], seq[:, ii:]], -1)
+            
             # Calculate how much to trim to get back to length L
             current_len = inserted.shape[-1]
             excess = current_len - L
@@ -168,40 +210,78 @@ class RandomInsertion(AugmentBase):
                 # No trimming needed
                 final_seq = inserted
             
+            # Ensure the final sequence has exactly length L
+            if final_seq.shape[-1] != L:
+                # If still wrong length, pad or trim to exactly L
+                if final_seq.shape[-1] > L:
+                    final_seq = final_seq[:, :L]
+                else:
+                    # Pad with random DNA to reach length L
+                    padding_needed = L - final_seq.shape[-1]
+                    padding = a[p.multinomial(padding_needed, replacement=True)].transpose(0,1).to(x.device)
+                    final_seq = torch.cat([final_seq, padding], -1)
+            
             x_aug.append(final_seq)
 
-        return torch.stack(x_aug)
+        # Stack all sequences and ensure they all have the same shape
+        stacked = torch.stack(x_aug)
+        
+        # Final safety check - ensure all sequences have exactly length L
+        if stacked.shape[-1] != L:
+            print(f"Warning: RandomInsertion output shape {stacked.shape} doesn't match expected length {L}")
+            # Force all sequences to length L by trimming or padding
+            if stacked.shape[-1] > L:
+                stacked = stacked[:, :, :L]
+            else:
+                # Pad all sequences to length L
+                padding_needed = L - stacked.shape[-1]
+                padding = torch.stack([a[p.multinomial(padding_needed, replacement=True)].transpose(0,1) for _ in range(N)]).to(x.device)
+                stacked = torch.cat([stacked, padding], -1)
+        
+        return stacked
 
 
 class RandomTranslocation(AugmentBase):
-    """Randomly cuts sequence in two pieces and shifts the order for each in a training
-    batch. This is implemented with a roll transformation with a user-defined shift_min
-    and shift_max. A different roll (positive or negative) is applied to each sequence.
-    Each sequence is padded with random DNA to ensure same shapes.
+    """
+    Randomly shifts sequences using circular roll transformations.
+    
+    This augmentation applies random positive or negative shifts to each sequence
+    in a batch, effectively cutting the sequence and reordering the pieces
+    while maintaining the original sequence length L.
 
     Parameters
     ----------
     shift_min : int, optional
-        Minimum size for random shift, defaults to 0.
+        Minimum size for random shift. Defaults to 0.
     shift_max : int, optional
-        Maximum size for random shift, defaults to 20.
+        Maximum size for random shift. Defaults to 20.
+        
+    Notes
+    -----
+    - Shifts are randomly chosen between shift_min and shift_max
+    - Approximately half of the shifts are made negative to create
+      both left and right circular shifts
+    - Uses torch.roll for efficient implementation
+    - Each sequence in the batch receives a different random shift
     """
+    
     def __init__(self, shift_min=0, shift_max=20):
         self.shift_min = shift_min
         self.shift_max = shift_max
 
     def __call__(self, x):
-        """Randomly shifts sequences in a batch, x.
+        """Randomly shift sequences in a batch using circular roll.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with random translocations.
+            Sequences with random circular shifts applied, maintaining
+            shape (N, A, L).
         """
         N = x.shape[0]
 
@@ -220,40 +300,50 @@ class RandomTranslocation(AugmentBase):
         return x_rolled
 
 
-
 class RandomInversion(AugmentBase):
-    """Randomly inverts a contiguous stretch of nucleotides from sequences in a training
-    batch according to a user-defined invert_min and invert_max. A different insertions
-    is applied to each sequence. Each sequence is padded with random DNA to ensure same
-    shapes.
+    """
+    Randomly inverts contiguous stretches of nucleotides in sequences.
+    
+    This augmentation randomly selects inversion lengths and positions for each sequence
+    in a batch, then applies a reverse-complement transformation to the selected region
+    while maintaining the original sequence length L.
 
     Parameters
     ----------
     invert_min : int, optional
-        Minimum size for random insertion, defaults to 0.
+        Minimum size for random inversion. Defaults to 0.
     invert_max : int, optional
-        Maximum size for random insertion, defaults to 20.
+        Maximum size for random inversion. Defaults to 20.
+        
+    Notes
+    -----
+    - Inversion positions are constrained to ensure the inversion window fits within
+      the sequence boundaries
+    - Applies reverse-complement transformation (flip both sequence and nucleotide dimensions)
+    - Each sequence in the batch receives a different random inversion
     """
+    
     def __init__(self, invert_min=0, invert_max=20):
         self.invert_min = invert_min
         self.invert_max = invert_max
 
     def __call__(self, x):
-        """Randomly inverts segments of random DNA to a set of one-hot DNA sequences.
+        """Randomly invert segments of DNA sequences.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with randomly inverted segments of random DNA.
+            Sequences with randomly inverted segments, maintaining
+            shape (N, A, L).
         """
         N, A, L = x.shape
 
-        # set random inversion size for each seequence
+        # set random inversion size for each sequence
         inversion_lens = torch.randint(self.invert_min, self.invert_max + 1, (N,))
 
         # randomly select start location for each inversion
@@ -269,31 +359,43 @@ class RandomInversion(AugmentBase):
         return torch.stack(x_aug)
 
 
-
 class RandomMutation(AugmentBase):
-    """Randomly mutates sequences in a training batch according to a user-defined
-    mutate_frac. A different set of mutations is applied to each sequence.
+    """
+    Randomly mutates nucleotides in sequences according to a mutation fraction.
+    
+    This augmentation randomly selects positions in each sequence and replaces
+    the nucleotides with random DNA, effectively introducing point mutations
+    while maintaining the original sequence length L.
 
     Parameters
     ----------
     mutate_frac : float, optional
-        Probability of mutation for each nucleotide, defaults to 0.05.
+        Probability of mutation for each nucleotide. Defaults to 0.05.
+        
+    Notes
+    -----
+    - The actual number of mutations is calculated as: round(mutate_frac / 0.75 * L)
+    - The division by 0.75 accounts for silent mutations (nucleotides that don't change)
+    - Random DNA is generated using uniform nucleotide distribution
+    - Each sequence in the batch receives a different set of random mutations
     """
+    
     def __init__(self, mut_frac=0.05):
         self.mutate_frac = mut_frac
 
     def __call__(self, x):
-        """Randomly introduces mutations to a set of one-hot DNA sequences.
+        """Randomly introduce mutations to a set of one-hot DNA sequences.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with randomly mutated DNA.
+            Sequences with randomly mutated DNA, maintaining
+            shape (N, A, L).
         """
         N, A, L = x.shape
 
@@ -321,34 +423,51 @@ class RandomMutation(AugmentBase):
         return x_aug
 
 
-
 class RandomRC(AugmentBase):
-    """Randomly applies a reverse-complement transformation to each sequence in a training
-    batch according to a user-defined probability, rc_prob. This is applied to each sequence
-    independently.
+    """
+    Randomly applies reverse-complement transformations to sequences.
+    
+    This augmentation randomly selects sequences in a batch and applies
+    a reverse-complement transformation with a specified probability.
+    The transformation reverses both the sequence order and nucleotide
+    identity while maintaining the original sequence length L.
 
     Parameters
     ----------
     rc_prob : float, optional
-        Probability to apply a reverse-complement transformation, defaults to 0.5.
+        Probability to apply a reverse-complement transformation. Defaults to 0.5.
+        
+    Notes
+    -----
+    - Each sequence is independently selected for transformation
+    - Uses torch.flip with dims=[1,2] to reverse both sequence and nucleotide dimensions
+    - Maintains original sequence length L
+    - Useful for learning strand-invariant representations
     """
+    
     def __init__(self, rc_prob=0.5):
-        """Creates random reverse-complement object usable by EvoAug.
+        """Create random reverse-complement augmentation object.
+        
+        Parameters
+        ----------
+        rc_prob : float
+            Probability to apply reverse-complement transformation.
         """
         self.rc_prob = rc_prob
 
     def __call__(self, x):
-        """Randomly transforms sequences in a batch with a reverse-complement transformation.
+        """Randomly transform sequences with reverse-complement transformations.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with random reverse-complements applied.
+            Sequences with random reverse-complements applied, maintaining
+            shape (N, A, L).
         """
         # make a copy of the sequence
         x_aug = torch.clone(x)
@@ -362,31 +481,44 @@ class RandomRC(AugmentBase):
 
 
 class RandomNoise(AugmentBase):
-    """Randomly add Gaussian noise to a batch of sequences with according to a user-defined
-    noise_mean and noise_std. A different set of noise is applied to each sequence.
+    """
+    Randomly adds Gaussian noise to sequences.
+    
+    This augmentation adds random Gaussian noise to each sequence in a batch,
+    effectively introducing small perturbations to the one-hot encodings
+    while maintaining the original sequence length L.
 
     Parameters
     ----------
     noise_mean : float, optional
-        Mean of the Gaussian noise, defaults to 0.0.
+        Mean of the Gaussian noise. Defaults to 0.0.
     noise_std : float, optional
-        Standard deviation of the Gaussian noise, defaults to 0.2.
+        Standard deviation of the Gaussian noise. Defaults to 0.2.
+        
+    Notes
+    -----
+    - Noise is sampled from a normal distribution with specified mean and standard deviation
+    - Noise is added element-wise to the input tensor
+    - Useful for improving model robustness to small perturbations
+    - Each sequence in the batch receives different random noise
     """
+    
     def __init__(self, noise_mean=0.0, noise_std=0.2):
         self.noise_mean = noise_mean
         self.noise_std = noise_std
 
     def __call__(self, x):
-        """Randomly adds Gaussian noise to a set of one-hot DNA sequences.
+        """Randomly add Gaussian noise to a set of one-hot DNA sequences.
 
         Parameters
         ----------
         x : torch.Tensor
-            Batch of one-hot sequences (shape: (N, A, L)).
+            Batch of one-hot sequences with shape (N, A, L).
 
         Returns
         -------
         torch.Tensor
-            Sequences with random noise.
+            Sequences with random noise added, maintaining
+            shape (N, A, L).
         """
         return x + torch.normal(self.noise_mean, self.noise_std, x.shape).to(x.device)
