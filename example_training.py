@@ -3,7 +3,8 @@
 DeepSTARR Training Script with EvoAug2 DataLoader Version
 
 This script converts the Jupyter notebook to use evoaug2 with the dataloader version
-instead of the model wrapper approach.
+instead of the model wrapper approach. It also checks for existing checkpoints
+to avoid retraining already trained models.
 """
 
 import os
@@ -27,6 +28,84 @@ print(f"Using device: {device}")
 
 # Set PyTorch precision for better performance on Tensor Cores
 torch.set_float32_matmul_precision('medium')
+
+
+def check_existing_checkpoints(output_dir, expt_name):
+    """
+    Check for existing checkpoints and return their status.
+    
+    Parameters
+    ----------
+    output_dir : str
+        Directory where checkpoints are saved.
+    expt_name : str
+        Base name for the experiment.
+        
+    Returns
+    -------
+    dict
+        Dictionary with checkpoint status and paths.
+    """
+    checkpoint_status = {
+        'augmented': {'exists': False, 'path': None, 'epochs': None},
+        'finetuned': {'exists': False, 'path': None, 'epochs': None},
+        'control': {'exists': False, 'path': None, 'epochs': None}
+    }
+    
+    # Check for augmented model checkpoint
+    aug_path = os.path.join(output_dir, f"{expt_name}_aug.ckpt")
+    if os.path.exists(aug_path):
+        checkpoint_status['augmented']['exists'] = True
+        checkpoint_status['augmented']['path'] = aug_path
+        # Try to get epoch information from checkpoint
+        try:
+            checkpoint = torch.load(aug_path, map_location='cpu')
+            if 'epoch' in checkpoint:
+                checkpoint_status['augmented']['epochs'] = checkpoint['epoch']
+        except:
+            pass
+    
+    # Check for fine-tuned model checkpoint
+    finetune_path = os.path.join(output_dir, f"{expt_name}_finetune.ckpt")
+    if os.path.exists(finetune_path):
+        checkpoint_status['finetuned']['exists'] = True
+        checkpoint_status['finetuned']['path'] = finetune_path
+        try:
+            checkpoint = torch.load(finetune_path, map_location='cpu')
+            if 'epoch' in checkpoint:
+                checkpoint_status['finetuned']['epochs'] = checkpoint['epoch']
+        except:
+            pass
+    
+    # Check for control model checkpoint
+    control_path = os.path.join(output_dir, f"{expt_name}_standard.ckpt")
+    if os.path.exists(control_path):
+        checkpoint_status['control']['exists'] = True
+        checkpoint_status['control']['path'] = control_path
+        try:
+            checkpoint = torch.load(control_path, map_location='cpu')
+            if 'epoch' in checkpoint:
+                checkpoint_status['control']['epochs'] = checkpoint['epoch']
+        except:
+            pass
+    
+    return checkpoint_status
+
+
+def print_checkpoint_status(checkpoint_status):
+    """Print the status of existing checkpoints."""
+    print("\n" + "="*50)
+    print("EXISTING CHECKPOINT STATUS")
+    print("="*50)
+    
+    for stage, status in checkpoint_status.items():
+        if status['exists']:
+            epoch_info = f" (epochs: {status['epochs']})" if status['epochs'] is not None else ""
+            print(f"✓ {stage.capitalize()} model: {os.path.basename(status['path'])}{epoch_info}")
+        else:
+            print(f"✗ {stage.capitalize()} model: NOT FOUND")
+    
+    print("="*50)
 
 
 def main():
@@ -65,6 +144,10 @@ def main():
         print("wget https://zenodo.org/record/7265991/files/DeepSTARR_data.h5")
         return
     
+    # Check for existing checkpoints
+    checkpoint_status = check_existing_checkpoints(output_dir, expt_name)
+    print_checkpoint_status(checkpoint_status)
+    
     # Define augmentations using optimal DeepSTARR hyperparameters from hyperparameter search
     # Based on Additional file 1: Figs. S1, S3, and S4 from the paper
     augment_list = [
@@ -86,17 +169,6 @@ def main():
     print("  - Max augmentations per sequence: 2")
     print("  - Augmentation setting: Hard (always apply exactly 2 augmentations)")
     print("  - Augmentation priority order: inversion, deletion, translocation, insertion, reverse-complement, mutation, noise")
-    
-    print("=== Stage 1: Training with EvoAug2 Augmentations ===")
-    print("Training DNN on sequences with EvoAug augmentations applied stochastically online...")
-    print("Goal: Enhance model's ability to learn robust representations of features (e.g., motifs)")
-    print("      by exposing it to expanded genetic variation while preserving motifs on average")
-    
-    # Create model
-    deepstarr = DeepSTARR(2)
-    
-    # Create Lightning model
-    model = DeepSTARRModel(deepstarr, learning_rate=0.001, weight_decay=1e-6)
     
     # Create enhanced H5Dataset (now includes DataModule-like functionality)
     base_dataset = utils.H5Dataset(filepath, batch_size=batch_size, lower_case=False, transpose=False)
@@ -158,44 +230,78 @@ def main():
         hard_aug=True         # DeepSTARR uses hard setting: always apply exactly 2 augmentations
     )
     
-    # Create trainer
-    ckpt_aug_path = expt_name + "_aug"
-    callback_topmodel = pl.callbacks.ModelCheckpoint(
-        monitor='val_loss',
-        save_top_k=1,
-        dirpath=output_dir,
-        filename=ckpt_aug_path
-    )
-    callback_es = pl.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+    # STAGE 1: Training with EvoAug2 Augmentations
+    print("\n=== Stage 1: Training with EvoAug2 Augmentations ===")
     
-    # Create custom trainer that uses our augmented training dataloader
-    trainer = pl.Trainer(
-        max_epochs=100,
-        logger=None,
-        callbacks=[callback_es, callback_topmodel],
-        accelerator='auto',
-        devices='auto',
-    )
+    if checkpoint_status['augmented']['exists']:
+        print(f"✓ Found existing augmented model checkpoint: {os.path.basename(checkpoint_status['augmented']['path'])}")
+        print("Skipping Stage 1 training - using existing model.")
+        best_model_path = checkpoint_status['augmented']['path']
+    else:
+        print("Training DNN on sequences with EvoAug augmentations applied stochastically online...")
+        print("Goal: Enhance model's ability to learn robust representations of features (e.g., motifs)")
+        print("      by exposing it to expanded genetic variation while preserving motifs on average")
+        
+        # Create model
+        deepstarr = DeepSTARR(2)
+        
+        # Create Lightning model
+        model = DeepSTARRModel(deepstarr, learning_rate=0.001, weight_decay=1e-6)
+        
+        # Create trainer
+        ckpt_aug_path = expt_name + "_aug"
+        callback_topmodel = pl.callbacks.ModelCheckpoint(
+            monitor='val_loss',
+            save_top_k=1,
+            dirpath=output_dir,
+            filename=ckpt_aug_path
+        )
+        callback_es = pl.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+        
+        # Create custom trainer that uses our augmented training dataloader
+        trainer = pl.Trainer(
+            max_epochs=100,
+            logger=None,
+            callbacks=[callback_es, callback_topmodel],
+            accelerator='auto',
+            devices='auto',
+        )
+        
+        # Train model with augmentations using Lightning trainer
+        print(f"Starting Stage 1 training with EvoAug2 augmentations...")
+        print(f"Augmented model will be saved to: {os.path.join(output_dir, ckpt_aug_path + '.ckpt')}")
+        print("Training on augmented data to learn robust feature representations...")
+        
+        # Use Lightning trainer with augmented data module
+        trainer.fit(model, datamodule=data_module)
+        
+        print("=== Stage 1: Training with augmentations completed ===")
+        
+        # Get the best model path
+        best_model_path = os.path.join(output_dir, ckpt_aug_path + ".ckpt")
     
-    # Train model with augmentations using Lightning trainer
-    print(f"Starting Stage 1 training with EvoAug2 augmentations...")
-    print(f"Augmented model will be saved to: {os.path.join(output_dir, ckpt_aug_path + '.ckpt')}")
-    print("Training on augmented data to learn robust feature representations...")
-    
-    # Use Lightning trainer with augmented data module
-    trainer.fit(model, datamodule=data_module)
-    
-    print("=== Stage 1: Training with augmentations completed ===")
-    
-    # Load best model and evaluate
-    best_model_path = os.path.join(output_dir, ckpt_aug_path + ".ckpt")
+    # Evaluate the augmented model (either newly trained or loaded from checkpoint)
     if os.path.exists(best_model_path):
-        print(f"Loading best model from: {best_model_path}")
+        print(f"Loading augmented model from: {best_model_path}")
+        
+        # Create model architecture
+        deepstarr = DeepSTARR(2)
+        
+        # Load the model from checkpoint
         model = DeepSTARRModel.load_from_checkpoint(best_model_path, model=deepstarr)
         
         # Evaluate on test set (no augmentations used during evaluation)
         print("Evaluating augmented model on test set (no augmentations)...")
-        trainer.test(model, datamodule=data_module)
+        
+        # Create a simple trainer for evaluation
+        eval_trainer = pl.Trainer(
+            logger=None,
+            accelerator='auto',
+            devices='auto',
+        )
+        
+        # Evaluate using the data module
+        eval_trainer.test(model, datamodule=data_module)
         
         # Get predictions
         # Note: For models with insertion augmentation, sequences are padded at 3' end with random DNA
@@ -219,76 +325,93 @@ def main():
             vals.append(stats.spearmanr(y_true[:,class_index], y_score[:,class_index])[0])
         print(np.array(vals))
     
-    print("=== Stage 2: Fine-tuning on Original Data ===")
-    print("Fine-tuning the augmented model on original, unperturbed data to remove augmentation bias...")
-    print("Fine-tuning parameters: 5 epochs, learning rate 0.0001, weight decay 1e-6")
+    # STAGE 2: Fine-tuning on Original Data
+    print("\n=== Stage 2: Fine-tuning on Original Data ===")
     
-    # Load the best augmented model for fine-tuning
-    if os.path.exists(best_model_path):
-        print(f"Loading best augmented model for fine-tuning from: {best_model_path}")
-        # Load the model with the same architecture and weights from augmented training
-        model_finetune = DeepSTARRModel.load_from_checkpoint(best_model_path, model=deepstarr)
-        # Update learning rate for fine-tuning (lower learning rate for refinement)
-        model_finetune.learning_rate = 0.0001
-        model_finetune.configure_optimizers()  # Reconfigure with new learning rate
-        print("✓ Successfully loaded augmented model for fine-tuning")
+    if checkpoint_status['finetuned']['exists']:
+        print(f"✓ Found existing fine-tuned model checkpoint: {os.path.basename(checkpoint_status['finetuned']['path'])}")
+        print("Skipping Stage 2 fine-tuning - using existing model.")
+        best_finetune_path = checkpoint_status['finetuned']['path']
     else:
-        print("✗ ERROR: No augmented model found for fine-tuning!")
-        print("   Fine-tuning requires the augmented model from Stage 1.")
-        return
+        print("Fine-tuning the augmented model on original, unperturbed data to remove augmentation bias...")
+        print("Fine-tuning parameters: 5 epochs, learning rate 0.0001, weight decay 1e-6")
+        
+        # Load the best augmented model for fine-tuning
+        if os.path.exists(best_model_path):
+            print(f"Loading best augmented model for fine-tuning from: {best_model_path}")
+            # Load the model with the same architecture and weights from augmented training
+            model_finetune = DeepSTARRModel.load_from_checkpoint(best_model_path, model=deepstarr)
+            # Update learning rate for fine-tuning (lower learning rate for refinement)
+            model_finetune.learning_rate = 0.0001
+            model_finetune.configure_optimizers()  # Reconfigure with new learning rate
+            print("✓ Successfully loaded augmented model for fine-tuning")
+        else:
+            print("✗ ERROR: No augmented model found for fine-tuning!")
+            print("   Fine-tuning requires the augmented model from Stage 1.")
+            return
+        
+        # Use the same base_dataset but create a simple DataModule for fine-tuning
+        class FineTuneDataModule(pl.LightningDataModule):
+            def __init__(self, base_dataset):
+                super().__init__()
+                self.base_dataset = base_dataset
+                
+            def train_dataloader(self):
+                return self.base_dataset.train_dataloader()
+                
+            def val_dataloader(self):
+                return self.base_dataset.val_dataloader()
+                
+            def test_dataloader(self):
+                return self.base_dataset.test_dataloader()
+        
+        data_module_finetune = FineTuneDataModule(base_dataset)
+        
+        # Create trainer for fine-tuning
+        ckpt_finetune_path = expt_name + "_finetune"
+        callback_topmodel_finetune = pl.callbacks.ModelCheckpoint(
+            monitor='val_loss',
+            save_top_k=1,
+            dirpath=output_dir,
+            filename=ckpt_finetune_path
+        )
+        
+        trainer_finetune = pl.Trainer(
+            max_epochs=5,  # Fine-tuning for 5 epochs as specified in the paper
+            logger=None,
+            callbacks=[callback_topmodel_finetune],
+            accelerator='auto',
+            devices='auto'
+        )
+        
+        # Fine-tune model on original data
+        print(f"Starting fine-tuning on original, unperturbed data...")
+        print(f"Fine-tuned model will be saved to: {os.path.join(output_dir, ckpt_finetune_path + '.ckpt')}")
+        print("Goal: Remove augmentation bias and refine features towards observed biology")
+        trainer_finetune.fit(model_finetune, datamodule=data_module_finetune)
+        
+        print("=== Fine-tuning on original data completed ===")
+        
+        # Get the best fine-tuned model path
+        best_finetune_path = os.path.join(output_dir, ckpt_finetune_path + ".ckpt")
     
-    # Create data module without augmentations for fine-tuning
-    # Use the same base_dataset but create a simple DataModule for fine-tuning
-    class FineTuneDataModule(pl.LightningDataModule):
-        def __init__(self, base_dataset):
-            super().__init__()
-            self.base_dataset = base_dataset
-            
-        def train_dataloader(self):
-            return self.base_dataset.train_dataloader()
-            
-        def val_dataloader(self):
-            return self.base_dataset.val_dataloader()
-            
-        def test_dataloader(self):
-            return self.base_dataset.test_dataloader()
-    
-    data_module_finetune = FineTuneDataModule(base_dataset)
-    
-    # Create trainer for fine-tuning
-    ckpt_finetune_path = expt_name + "_finetune"
-    callback_topmodel_finetune = pl.callbacks.ModelCheckpoint(
-        monitor='val_loss',
-        save_top_k=1,
-        dirpath=output_dir,
-        filename=ckpt_finetune_path
-    )
-    
-    trainer_finetune = pl.Trainer(
-        max_epochs=5,  # Fine-tuning for 5 epochs as specified in the paper
-        logger=None,
-        callbacks=[callback_topmodel_finetune],
-        accelerator='auto',
-        devices='auto'
-    )
-    
-    # Fine-tune model on original data
-    print(f"Starting fine-tuning on original, unperturbed data...")
-    print(f"Fine-tuned model will be saved to: {os.path.join(output_dir, ckpt_finetune_path + '.ckpt')}")
-    print("Goal: Remove augmentation bias and refine features towards observed biology")
-    trainer_finetune.fit(model_finetune, datamodule=data_module_finetune)
-    
-    print("=== Fine-tuning on original data completed ===")
-    
-    # Load best fine-tuned model and evaluate
-    best_finetune_path = os.path.join(output_dir, ckpt_finetune_path + ".ckpt")
+    # Evaluate the fine-tuned model
     if os.path.exists(best_finetune_path):
         print(f"Loading best fine-tuned model from: {best_finetune_path}")
         model_finetune = DeepSTARRModel.load_from_checkpoint(best_finetune_path, model=deepstarr)
         
         # Evaluate on test set (no augmentations used during evaluation)
         print("Evaluating fine-tuned model on test set (no augmentations)...")
-        trainer_finetune.test(model_finetune, datamodule=data_module_finetune)
+        
+        # Create a simple trainer for evaluation
+        eval_trainer = pl.Trainer(
+            logger=None,
+            accelerator='auto',
+            devices='auto'
+        )
+        
+        # Evaluate using the fine-tune data module
+        eval_trainer.test(model_finetune, datamodule=data_module_finetune)
         
         # Get predictions
         # Note: Fine-tuned model is evaluated on original, unperturbed sequences
@@ -313,52 +436,70 @@ def main():
     else:
         print("✗ ERROR: Fine-tuned model was not saved!")
     
-    print("=== Control: Training on Original Data Only ===")
-    print("Training a separate DNN model from scratch on original, unperturbed data...")
-    print("Purpose: Baseline comparison to evaluate the effectiveness of the two-stage approach")
+    # CONTROL: Training on Original Data Only
+    print("\n=== Control: Training on Original Data Only ===")
     
-    # Create control model (no augmentations)
-    deepstarr_control = DeepSTARR(2)
-    model_control = DeepSTARRModel(deepstarr_control, learning_rate=0.001, weight_decay=1e-6)
+    if checkpoint_status['control']['exists']:
+        print(f"✓ Found existing control model checkpoint: {os.path.basename(checkpoint_status['control']['path'])}")
+        print("Skipping Control training - using existing model.")
+        best_control_path = checkpoint_status['control']['path']
+    else:
+        print("Training a separate DNN model from scratch on original, unperturbed data...")
+        print("Purpose: Baseline comparison to evaluate the effectiveness of the two-stage approach")
+        
+        # Create control model (no augmentations)
+        deepstarr_control = DeepSTARR(2)
+        model_control = DeepSTARRModel(deepstarr_control, learning_rate=0.001, weight_decay=1e-6)
+        
+        # Use the same base_dataset for control training
+        data_module_control = FineTuneDataModule(base_dataset)
+        
+        # Create trainer for control
+        ckpt_control_path = expt_name + "_standard"
+        callback_topmodel_control = pl.callbacks.ModelCheckpoint(
+            monitor='val_loss',
+            save_top_k=1,
+            dirpath=output_dir,
+            filename=ckpt_control_path
+        )
+        callback_es_control = pl.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+        
+        trainer_control = pl.Trainer(
+            max_epochs=100,
+            logger=None,
+            callbacks=[callback_es_control, callback_topmodel_control],
+            accelerator='auto',
+            devices='auto'
+        )
+        
+        # Train control model on original data
+        print(f"Starting control training on original, unperturbed data...")
+        print(f"Control model will be saved to: {os.path.join(output_dir, ckpt_control_path + '.ckpt')}")
+        print("Training from scratch without any augmentations for baseline comparison...")
+        trainer_control.fit(model_control, datamodule=data_module_control)
+        
+        print("=== Control training on original data completed ===")
+        
+        # Get the best control model path
+        best_control_path = os.path.join(output_dir, ckpt_control_path + ".ckpt")
     
-    # Use the same base_dataset for control training
-    data_module_control = FineTuneDataModule(base_dataset)
-    
-    # Create trainer for control
-    ckpt_control_path = expt_name + "_standard"
-    callback_topmodel_control = pl.callbacks.ModelCheckpoint(
-        monitor='val_loss',
-        save_top_k=1,
-        dirpath=output_dir,
-        filename=ckpt_control_path
-    )
-    callback_es_control = pl.callbacks.EarlyStopping(monitor='val_loss', patience=10)
-    
-    trainer_control = pl.Trainer(
-        max_epochs=100,
-        logger=None,
-        callbacks=[callback_es_control, callback_topmodel_control],
-        accelerator='auto',
-        devices='auto'
-    )
-    
-    # Train control model on original data
-    print(f"Starting control training on original, unperturbed data...")
-    print(f"Control model will be saved to: {os.path.join(output_dir, ckpt_control_path + '.ckpt')}")
-    print("Training from scratch without any augmentations for baseline comparison...")
-    trainer_control.fit(model_control, datamodule=data_module_control)
-    
-    print("=== Control training on original data completed ===")
-    
-    # Load best control model and evaluate
-    best_control_path = os.path.join(output_dir, ckpt_control_path + ".ckpt")
+    # Evaluate the control model
     if os.path.exists(best_control_path):
         print(f"Loading best control model from: {best_control_path}")
         model_control = DeepSTARRModel.load_from_checkpoint(best_control_path, model=deepstarr_control)
         
         # Evaluate on test set (no augmentations used during evaluation)
         print("Evaluating control model on test set (no augmentations)...")
-        trainer_control.test(model_control, datamodule=data_module_control)
+        
+        # Create a simple trainer for evaluation
+        eval_trainer = pl.Trainer(
+            logger=None,
+            accelerator='auto',
+            devices='auto'
+        )
+        
+        # Evaluate using the control data module
+        eval_trainer.test(model_control, datamodule=data_module_control)
         
         # Get predictions
         # Note: Control model is evaluated on original, unperturbed sequences
@@ -391,25 +532,25 @@ def main():
     saved_models = []
     
     # Check Stage 1: Augmented model
-    if os.path.exists(os.path.join(output_dir, ckpt_aug_path + ".ckpt")):
-        saved_models.append(f"✓ {ckpt_aug_path}.ckpt - Stage 1: Model trained with EvoAug2 augmentations")
+    if os.path.exists(best_model_path):
+        saved_models.append(f"✓ {os.path.basename(best_model_path)} - Stage 1: Model trained with EvoAug2 augmentations")
         saved_models.append("   → Learned robust representations from expanded genetic variation")
     else:
-        saved_models.append(f"✗ {ckpt_aug_path}.ckpt - Stage 1: NOT SAVED")
+        saved_models.append(f"✗ Stage 1: NOT SAVED")
     
     # Check Stage 2: Fine-tuned model
-    if os.path.exists(os.path.join(output_dir, ckpt_finetune_path + ".ckpt")):
-        saved_models.append(f"✓ {ckpt_finetune_path}.ckpt - Stage 2: Model fine-tuned on original data")
+    if os.path.exists(best_finetune_path):
+        saved_models.append(f"✓ {os.path.basename(best_finetune_path)} - Stage 2: Model fine-tuned on original data")
         saved_models.append("   → Removed augmentation bias, refined features towards observed biology")
     else:
-        saved_models.append(f"✗ {ckpt_finetune_path}.ckpt - Stage 2: NOT SAVED")
+        saved_models.append(f"✗ Stage 2: NOT SAVED")
     
     # Check Control model
-    if os.path.exists(os.path.join(output_dir, ckpt_control_path + ".ckpt")):
-        saved_models.append(f"✓ {ckpt_control_path}.ckpt - Control: Model trained on original data only")
+    if os.path.exists(best_control_path):
+        saved_models.append(f"✓ {os.path.basename(best_control_path)} - Control: Model trained on original data only")
         saved_models.append("   → Baseline comparison for evaluating two-stage approach")
     else:
-        saved_models.append(f"✗ {ckpt_control_path}.ckpt - Control: NOT SAVED")
+        saved_models.append(f"✗ Control: NOT SAVED")
     
     print("\nTraining Stages Completed:")
     for model in saved_models:
@@ -420,6 +561,10 @@ def main():
     print("  1. Stage 1: Train with augmentations → Learn robust feature representations")
     print("  2. Stage 2: Fine-tune on original data → Remove bias, refine towards biology")
     print("  3. Control: Train on original data only → Baseline comparison")
+    print("\nCheckpoint Usage:")
+    print("  - Script automatically detects existing checkpoints")
+    print("  - Skips training for models that already exist")
+    print("  - Allows resuming from previous training sessions")
     print("="*50)
 
 
