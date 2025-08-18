@@ -1,135 +1,169 @@
-# EvoAug
+## EvoAug2: Evolution-inspired sequence augmentations as a DataLoader
 
-EvoAug is a PyTorch package to pretrain sequence-based deep learning models for regulatory genomics data with evolution-inspired data augmentations followed by a finetuning on the original, unperturbed sequence data. This work uses PyTorch Lightning -- LightningModule -- to define a model wrapper that is used for training. This is work that directly follows from "EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations" by Nicholas Keone Lee, Ziqi (Amber) Tang, Shushan Toneyan, and Peter K Koo. Code in this repository is shared under the MIT License. For additional information, see documentation on [EvoAug.ReadTheDocs.io](https://evoaug.readthedocs.io/en/latest/index.html).
+EvoAug2 provides evolution-inspired data augmentations for genomic sequences and a simple way to use them with any PyTorch model via a drop-in DataLoader. It replaces the old model-wrapper approach with a lightweight dataset/loader that applies augmentations on-the-fly. The core design goal is to keep the output sequence length exactly equal to the input length L for every augmentation.
 
-For questions, email: koo@cshl.edu
+- **Where to look**:
+  - `evoaug/augment.py`: augmentation implementations (length-preserving)
+  - `evoaug/evoaug2.py`: `AugmentedGenomicDataset` and `RobustLoader`
+  - `evoaug2_deepstarr_training.py`: example training script with Lightning
 
-<img src="fig/augmentations.png" alt="fig" width="500"/>
+## What’s new
+- **Loader-first design**: `RobustLoader` wraps any base dataset and applies augmentations stochastically per mini-batch, no model wrapper needed.
+- **Length-preserving augmentations**:
+  - **RandomDeletion**: deletes a contiguous segment and pads equally with random DNA to keep length L.
+  - **RandomInsertion**: inserts random DNA at a chosen index, then trims equally from both sequence ends so final length is exactly L.
+  - **RandomTranslocation**, **RandomInversion**, **RandomRC**, **RandomMutation**, **RandomNoise** all preserve input shape.
+- **Safer indexing**: all per-sequence lengths/indices are handled robustly for consistent slicing across PyTorch versions.
 
-<img src="fig/overview.png" alt="overview" width="500"/>
-
-
-
-#### Install:
-
-```
+## Install
+```bash
 pip install evoaug
 ```
 
+## Dependencies
+- torch >= 1.12
+- lightning >= 2.0.0
+- numpy >= 1.21
 
-#### Dependencies:
+Note: This package uses the newer `lightning` package (`lightning.pytorch`). If you use older `pytorch_lightning`, adjust the `Trainer` call accordingly.
 
-```
-torch 1.12.1+cu113
-lightning >= 2.0.0
-numpy 1.21.6
-```
-
-Note: This package has been updated to use the newer `lightning` package instead of `pytorch_lightning`. For older versions that use pytorch_lightning, the pl.Trainer call will need to be modified accordingly as the arguments for gpus has changed from version 1.7.
-
-#### Example
-
+## Augmentations
 ```python
-from evoaug import evoaug, augment
-import lightning.pytorch as pl
-
-model = "DEFINE PYTORCH MODEL"
-loss = "DEFINE PYTORCH LOSS"
-optimizer_dict = "DEFINE OPTIMIZER OR OPTIMIZER DICT"
+from evoaug import augment
 
 augment_list = [
-	augment.RandomDeletion(delete_min=0, delete_max=20),
-	augment.RandomRC(rc_prob=0.5),
-	augment.RandomInsertion(insert_min=0, insert_max=20),
-	augment.RandomTranslocation(shift_min=0, shift_max=20),
-	augment.RandomMutation(mut_frac=0.05),
-	augment.RandomNoise(noise_mean=0, noise_std=0.2),
+    augment.RandomDeletion(delete_min=0, delete_max=30),
+    augment.RandomTranslocation(shift_min=0, shift_max=20),
+    augment.RandomInsertion(insert_min=0, insert_max=20),
+    augment.RandomRC(rc_prob=0.0),
+    augment.RandomMutation(mut_frac=0.05),
+    augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
+]
+```
+All transforms return tensors with the same shape as input `(N, A, L)`.
+
+## Using RobustLoader with PyTorch Lightning (DataModule)
+Wrap your existing dataset with `RobustLoader` for training, and disable augmentations for validation/test. Because augmentations preserve length, train/val/test shapes will match, including during sanity validation.
+
+```python
+import lightning.pytorch as pl
+from evoaug.evoaug2 import RobustLoader
+from evoaug import augment
+
+augment_list = [
+    augment.RandomDeletion(delete_min=0, delete_max=30),
+    augment.RandomTranslocation(shift_min=0, shift_max=20),
+    augment.RandomInsertion(insert_min=0, insert_max=20),
+    augment.RandomRC(rc_prob=0.0),
+    augment.RandomMutation(mut_frac=0.05),
+    augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
 ]
 
-robust_model = evoaug.RobustModel(
-	model,
-	criterion=loss,
-	optimizer=optimizer_dict,
-	augment_list=augment_list,
-	max_augs_per_seq=2,  # maximum number of augmentations per sequence
-	hard_aug=True,  # use max_augs_per_seq, otherwise sample randomly up to max
-	inference_aug=False  # if true, keep augmentations on during inference time
-)
+class AugmentedDataModule(pl.LightningDataModule):
+    def __init__(self, base_module, augment_list, max_augs_per_seq=2, hard_aug=True):
+        super().__init__()
+        self.base_module = base_module
+        self.augment_list = augment_list
+        self.max_augs_per_seq = max_augs_per_seq
+        self.hard_aug = hard_aug
 
-# set up callback
-callback_topmodel = pl.callbacks.ModelCheckpoint(
-	monitor='val_loss',
-	save_top_k=1,
-	dirpath=output_dir,
-	filename=ckpt_aug_path
-)
+    def train_dataloader(self):
+        base_dataset = self.base_module.train_dataloader().dataset
+        return RobustLoader(
+            base_dataset=base_dataset,
+            augment_list=self.augment_list,
+            max_augs_per_seq=self.max_augs_per_seq,
+            hard_aug=self.hard_aug,
+            batch_size=self.base_module.batch_size,
+            shuffle=True
+        )
 
-# train model
+    def val_dataloader(self):
+        return self.base_module.val_dataloader()
+
+    def test_dataloader(self):
+        return self.base_module.test_dataloader()
+
+# Training with Lightning
 trainer = pl.Trainer(
-	accelerator="gpu",
-	devices=1,
-	max_epochs=100,
-	logger=None,
-	callbacks=["ADD CALLBACKS", callback_topmodel]
+    max_epochs=100,
+    accelerator="auto",
+    devices="auto"
 )
 
-# pre-train model with augmentations
-trainer.fit(robust_model, datamodule=data_module)
+trainer.fit(model, datamodule=AugmentedDataModule(
+    base_module=your_base_datamodule,
+    augment_list=augment_list,
+    max_augs_per_seq=2,
+    hard_aug=True
+))
 
-# load best model
-robust_model = evoaug.load_model_from_checkpoint(robust_model, ckpt_aug_path)
-
-# set up fine-tuning
-robust_model.finetune = True
-robust_model.optimizer = # set up optimizer for fine-tuning
-
-# set up callback
-callback_topmodel = pl.callbacks.ModelCheckpoint(
-	monitor='val_loss',
-	save_top_k=1,
-	dirpath=output_dir,
-	filename=ckpt_finetune_path
-)
-
-# set up pytorch lightning trainer
-trainer = pl.Trainer(
-	accelerator="gpu",
-	devices=1,
-	max_epochs=100,
-	logger=None,
-	callbacks=["ADD CALLBACKS", callback_topmodel]
-)
-
-# fine-tune model
-trainer.fit(robust_model, datamodule=data_module)
-
-# load best fine-tuned model
-robust_model = evoaug.load_model_from_checkpoint(robust_model, ckpt_finetune_path)
+# Finetune on original data (no augmentations)
+trainer.fit(model, datamodule=your_base_datamodule)
 ```
 
+## Using RobustLoader with a vanilla PyTorch training loop
+```python
+from evoaug.evoaug2 import RobustLoader
+from evoaug import augment
 
-#### Examples on Google Colab:
+# Your base dataset must return (sequence, target) where sequence has shape (A, L)
+base_dataset = YourDataset(...)
+augment_list = [
+    augment.RandomDeletion(delete_min=0, delete_max=30),
+    augment.RandomTranslocation(shift_min=0, shift_max=20),
+    augment.RandomInsertion(insert_min=0, insert_max=20),
+]
 
-DeepSTARR analysis:
-- Example analysis: https://colab.research.google.com/drive/1a2fiRPBd1xvoJf0WNiMUgTYiLTs1XETf?usp=sharing
-- Example load model and perform attribution analysis: https://colab.research.google.com/drive/11DVkhyX2VhhCSbCGkW3XjviMxTufBvZh?usp=sharing
+train_loader = RobustLoader(
+    base_dataset=base_dataset,
+    augment_list=augment_list,
+    max_augs_per_seq=2,
+    hard_aug=True,
+    batch_size=128,
+    shuffle=True,
+    num_workers=4
+)
 
-ChIP-seq analysis:
-- Example analysis: https://colab.research.google.com/drive/1GZ8v4Tq3LQMZI30qvdhF7ZW6Kf5GDyKX?usp=sharing
+# Standard PyTorch loop (model expects input (N, A, L))
+for epoch in range(num_epochs):
+    model.train()
+    for x, y in train_loader:
+        x = x.to(device)      # (N, A, L)
+        y = y.to(device)
+        optimizer.zero_grad()
+        y_hat = model(x)
+        loss = criterion(y_hat, y)
+        loss.backward()
+        optimizer.step()
 
-# Citation
-
-If you find out work useful, please cite our paper.
-
-```bibtex
-@article{lee2023evoaug,
-  title={EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations},
-  author={Lee, Nicholas Keone and Tang, Ziqi and Toneyan, Shushan and Koo, Peter K},
-  journal={Genome Biology},
-  volume={24},
-  number={1},
-  pages={105},
-  year={2023},
-  publisher={Springer}
-}
+# Validation/test: use your original non-augmented loader or disable augmentations
+# train_loader.disable_augmentations()
 ```
+
+## API overview
+- `AugmentedGenomicDataset(base_dataset, augment_list, max_augs_per_seq=0, hard_aug=True, apply_augmentations=True)`
+  - Wraps an existing dataset and applies augmentations on-the-fly.
+  - `max_augs_per_seq`: maximum number of augmentations per sequence.
+  - `hard_aug=True`: always apply exactly `max_augs_per_seq` augmentations; otherwise a random number from 1..max is used.
+- `RobustLoader(...)`
+  - `enable_augmentations()` / `disable_augmentations()` to toggle augments (handy for finetuning).
+  - Preserves the original sequence length L for all transforms.
+
+## Tips and gotchas
+- If you use lazy modules (e.g., `nn.LazyLinear`), ensure train/val inputs have the same shape on the very first forward. With EvoAug2’s length-preserving transforms, this should hold if your base datasets share the same L.
+- To avoid any lazy-module edge cases during sanity validation, you can set:
+```python
+pl.Trainer(num_sanity_val_steps=0, ...)
+```
+- Alternatively, replace lazy layers with fixed-shape heads (e.g., global average pooling + `nn.Linear`).
+
+## Two-stage training workflow (recommended)
+1. Pretrain with EvoAug2 augmentations using `RobustLoader`.
+2. Finetune on the original data (augmentations disabled or standard loader).
+
+This follows the EvoAug methodology and typically improves robustness and generalization.
+
+## Reference
+- Paper: “EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations” (Genome Biology, 2023).
+- For questions: koo@cshl.edu 
