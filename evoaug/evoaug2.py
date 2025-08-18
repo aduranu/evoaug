@@ -160,7 +160,7 @@ class RobustLoader(DataLoader):
     EvoAug2 DataLoader that inherits from PyTorch DataLoader.
     
     This class provides a DataLoader with built-in EvoAug augmentations that can be
-    used directly in PyTorch Lightning DataModules or vanilla PyTorch training loops.
+    used with pl.DataModule or directly into vanilla PyTorch.
     
     Parameters
     ----------
