@@ -60,9 +60,9 @@ augment_list = [
 ]
 
 class AugmentedDataModule(pl.LightningDataModule):
-    def __init__(self, base_module, augment_list, max_augs_per_seq=2, hard_aug=True):
+    def __init__(self, base_dataset, augment_list, max_augs_per_seq=2, hard_aug=True):
         super().__init__()
-        self.base_module = base_module
+        self.base_dataset = base_dataset
         self.augment_list = augment_list
         self.max_augs_per_seq = max_augs_per_seq
         self.hard_aug = hard_aug

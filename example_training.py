@@ -4,7 +4,8 @@ DeepSTARR Training Script with EvoAug2 DataLoader Version
 
 This script converts the Jupyter notebook to use evoaug2 with the dataloader version
 instead of the model wrapper approach. It also checks for existing checkpoints
-to avoid retraining already trained models.
+to avoid retraining already trained models and includes comprehensive plotting
+of training metrics for comparison.
 """
 
 import os
@@ -21,6 +22,8 @@ from evoaug.evoaug import RobustLoader
 from utils.model_zoo import DeepSTARRModel, DeepSTARR
 from utils import utils
 from scipy import stats
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Set device
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -28,6 +31,10 @@ print(f"Using device: {device}")
 
 # Set PyTorch precision for better performance on Tensor Cores
 torch.set_float32_matmul_precision('medium')
+
+# Set plotting style
+plt.style.use('default')
+sns.set_palette("husl")
 
 
 def check_existing_checkpoints(output_dir, expt_name):
@@ -108,6 +115,241 @@ def print_checkpoint_status(checkpoint_status):
     print("="*50)
 
 
+def create_plots_directory():
+    """Create plots directory if it doesn't exist."""
+    plots_dir = "plots"
+    if not os.path.exists(plots_dir):
+        os.makedirs(plots_dir)
+        print(f"Created plots directory: {plots_dir}")
+    return plots_dir
+
+
+def plot_metrics_comparison(metrics_data, plots_dir, expt_name):
+    """
+    Create comprehensive plots comparing metrics across the three model types.
+    
+    Parameters
+    ----------
+    metrics_data : dict
+        Dictionary containing metrics for each model type.
+    plots_dir : str
+        Directory to save the plots.
+    expt_name : str
+        Name of the experiment for plot titles.
+    """
+    print(f"\nCreating comparison plots in {plots_dir}/...")
+    
+    # Set up the plotting style
+    plt.rcParams['figure.figsize'] = (12, 8)
+    plt.rcParams['font.size'] = 10
+    
+    # 1. Correlation Metrics Comparison (Bar Plot)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(f'{expt_name}: Model Performance Comparison', fontsize=16, fontweight='bold')
+    
+    # Extract metrics for plotting
+    model_names = list(metrics_data.keys())
+    pearson_r = [metrics_data[model]['pearson_r'] for model in model_names]
+    spearman_r = [metrics_data[model]['spearman_r'] for model in model_names]
+    
+    # Convert to numpy arrays for easier handling
+    pearson_r = np.array(pearson_r)
+    spearman_r = np.array(spearman_r)
+    
+    # Plot Pearson correlation
+    ax1 = axes[0, 0]
+    x_pos = np.arange(len(model_names))
+    bars1 = ax1.bar(x_pos, pearson_r.mean(axis=1), yerr=pearson_r.std(axis=1), 
+                     capsize=5, alpha=0.7, color=['#FF6B6B', '#4ECDC4', '#45B7D1'])
+    ax1.set_xlabel('Model Type')
+    ax1.set_ylabel('Pearson Correlation (r)')
+    ax1.set_title('Pearson Correlation Comparison')
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels([name.replace('_', ' ').title() for name in model_names])
+    ax1.grid(True, alpha=0.3)
+    
+    # Add value labels on bars
+    for i, bar in enumerate(bars1):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{pearson_r.mean(axis=1)[i]:.3f}', ha='center', va='bottom')
+    
+    # Plot Spearman correlation
+    ax2 = axes[0, 1]
+    bars2 = ax2.bar(x_pos, spearman_r.mean(axis=1), yerr=spearman_r.std(axis=1), 
+                     capsize=5, alpha=0.7, color=['#FF6B6B', '#4ECDC4', '#45B7D1'])
+    ax2.set_xlabel('Model Type')
+    ax2.set_ylabel('Spearman Correlation (ρ)')
+    ax2.set_title('Spearman Correlation Comparison')
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels([name.replace('_', ' ').title() for name in model_names])
+    ax2.grid(True, alpha=0.3)
+    
+    # Add value labels on bars
+    for i, bar in enumerate(bars2):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{spearman_r.mean(axis=1)[i]:.3f}', ha='center', va='bottom')
+    
+    # 2. Detailed Metrics by Class (Heatmap)
+    ax3 = axes[1, 0]
+    # Create heatmap data
+    heatmap_data = np.zeros((len(model_names), pearson_r.shape[1]))
+    for i, model in enumerate(model_names):
+        heatmap_data[i, :] = pearson_r[i, :]
+    
+    im = ax3.imshow(heatmap_data, cmap='RdYlBu_r', aspect='auto')
+    ax3.set_xlabel('Output Class')
+    ax3.set_ylabel('Model Type')
+    ax3.set_title('Pearson Correlation by Class')
+    ax3.set_xticks(range(pearson_r.shape[1]))
+    ax3.set_xticklabels([f'Class {i+1}' for i in range(pearson_r.shape[1])])
+    ax3.set_yticks(range(len(model_names)))
+    ax3.set_yticklabels([name.replace('_', ' ').title() for name in model_names])
+    
+    # Add text annotations
+    for i in range(len(model_names)):
+        for j in range(pearson_r.shape[1]):
+            text = ax3.text(j, i, f'{heatmap_data[i, j]:.3f}',
+                           ha="center", va="center", color="black", fontweight='bold')
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax3)
+    cbar.set_label('Pearson Correlation')
+    
+    # 3. Performance Improvement Analysis
+    ax4 = axes[1, 1]
+    
+    # Calculate improvement over control
+    if 'control' in metrics_data:
+        control_pearson = pearson_r[model_names.index('control')]
+        improvements = []
+        improvement_labels = []
+        
+        for i, model in enumerate(model_names):
+            if model != 'control':
+                improvement = pearson_r[i] - control_pearson
+                improvements.append(improvement)
+                improvement_labels.append(f'{model.replace("_", " ").title()} vs Control')
+        
+        if improvements:
+            improvements = np.array(improvements)
+            x_pos_imp = np.arange(len(improvements))
+            bars_imp = ax4.bar(x_pos_imp, improvements.mean(axis=1), 
+                              yerr=improvements.std(axis=1), capsize=5, alpha=0.7,
+                              color=['#FF6B6B', '#4ECDC4'])
+            ax4.set_xlabel('Model Comparison')
+            ax4.set_ylabel('Improvement in Pearson Correlation')
+            ax4.set_title('Performance Improvement Over Control')
+            ax4.set_xticks(x_pos_imp)
+            ax4.set_xticklabels(improvement_labels, rotation=45, ha='right')
+            ax4.grid(True, alpha=0.3)
+            ax4.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+            
+            # Add value labels
+            for i, bar in enumerate(bars_imp):
+                height = bar.get_height()
+                ax4.text(bar.get_x() + bar.get_width()/2., height + 0.005,
+                        f'{improvements.mean(axis=1)[i]:.3f}', ha='center', va='bottom')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, f'{expt_name}_metrics_comparison.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 4. Individual Model Performance (Detailed View)
+    fig2, axes2 = plt.subplots(1, 3, figsize=(18, 6))
+    fig2.suptitle(f'{expt_name}: Individual Model Performance', fontsize=16, fontweight='bold')
+    
+    for i, model in enumerate(model_names):
+        ax = axes2[i]
+        
+        # Create bar plot for each model
+        x_pos = np.arange(pearson_r.shape[1])
+        width = 0.35
+        
+        bars1 = ax.bar(x_pos - width/2, pearson_r[i], width, label='Pearson r', 
+                       alpha=0.7, color='#FF6B6B')
+        bars2 = ax.bar(x_pos + width/2, spearman_r[i], width, label='Spearman ρ', 
+                       alpha=0.7, color='#4ECDC4')
+        
+        ax.set_xlabel('Output Class')
+        ax.set_ylabel('Correlation Coefficient')
+        ax.set_title(f'{model.replace("_", " ").title()} Model')
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels([f'Class {j+1}' for j in range(pearson_r.shape[1])])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 1)
+        
+        # Add value labels
+        for j, bar in enumerate(bars1):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                   f'{pearson_r[i, j]:.3f}', ha='center', va='bottom', fontsize=8)
+        
+        for j, bar in enumerate(bars2):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                   f'{spearman_r[i, j]:.3f}', ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, f'{expt_name}_individual_performance.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 5. Summary Statistics Table
+    fig3, ax = plt.subplots(figsize=(12, 4))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Prepare table data
+    table_data = []
+    for model in model_names:
+        pearson_mean = f"{pearson_r[model_names.index(model)].mean():.4f}"
+        pearson_std = f"±{pearson_r[model_names.index(model)].std():.4f}"
+        spearman_mean = f"{spearman_r[model_names.index(model)].mean():.4f}"
+        spearman_std = f"±{spearman_r[model_names.index(model)].std():.4f}"
+        
+        table_data.append([
+            model.replace('_', ' ').title(),
+            f"{pearson_mean} {pearson_std}",
+            f"{spearman_mean} {spearman_std}"
+        ])
+    
+    table = ax.table(cellText=table_data,
+                     colLabels=['Model Type', 'Pearson r (mean ± std)', 'Spearman ρ (mean ± std)'],
+                     cellLoc='center',
+                     loc='center',
+                     colWidths=[0.3, 0.35, 0.35])
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 2)
+    
+    # Style the table
+    for i in range(len(table_data) + 1):
+        for j in range(3):
+            if i == 0:  # Header row
+                table[(i, j)].set_facecolor('#4ECDC4')
+                table[(i, j)].set_text_props(weight='bold', color='white')
+            else:  # Data rows
+                if i % 2 == 0:
+                    table[(i, j)].set_facecolor('#F7F7F7')
+                else:
+                    table[(i, j)].set_facecolor('#FFFFFF')
+    
+    plt.title(f'{expt_name}: Performance Summary', fontsize=14, fontweight='bold', pad=20)
+    plt.savefig(os.path.join(plots_dir, f'{expt_name}_performance_summary.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Saved comparison plots to {plots_dir}/")
+    print(f"  - {expt_name}_metrics_comparison.png")
+    print(f"  - {expt_name}_individual_performance.png") 
+    print(f"  - {expt_name}_performance_summary.png")
+
+
 def main():
     """Main training function implementing the two-stage EvoAug2 approach"""
     
@@ -137,6 +379,9 @@ def main():
     output_dir = '/grid/koo/home/duran/evoaug/testing/'
     batch_size = 128
     
+    # Create plots directory
+    plots_dir = create_plots_directory()
+    
     # Check if data file exists
     if not os.path.exists(filepath):
         print(f"Data file not found: {filepath}")
@@ -153,7 +398,7 @@ def main():
     augment_list = [
         #RandomDeletion(delete_min=0, delete_max=30),      # DeepSTARR optimal: delete_max = 30
         RandomTranslocation(shift_min=0, shift_max=20),   # DeepSTARR optimal: shift_max = 20
-        RandomInsertion(insert_min=0, insert_max=20),     # DeepSTARR optimal: insert_max = 20
+        # RandomInsertion(insert_min=0, insert_max=20),     # DeepSTARR optimal: insert_max = 20
         RandomRC(rc_prob=0.0),                           # DeepSTARR optimal: rc_prob = 0 (no reverse-complement)
         RandomMutation(mut_frac=0.05),                    # DeepSTARR optimal: mutate_frac = 0.05
         RandomNoise(noise_mean=0, noise_std=0.3),        # DeepSTARR optimal: noise_std = 0.3
@@ -229,6 +474,9 @@ def main():
         max_augs_per_seq=2,  # DeepSTARR optimal: maximum 2 augmentations per sequence
         hard_aug=True         # DeepSTARR uses hard setting: always apply exactly 2 augmentations
     )
+    
+    # Initialize metrics storage
+    metrics_data = {}
     
     # STAGE 1: Training with EvoAug2 Augmentations
     print("\n=== Stage 1: Training with EvoAug2 Augmentations ===")
@@ -317,13 +565,21 @@ def main():
         vals = []
         for class_index in range(y_true.shape[-1]):
             vals.append(stats.pearsonr(y_true[:,class_index], y_score[:,class_index])[0])
-        print(np.array(vals))
+        pearson_aug = np.array(vals)
+        print(pearson_aug)
         
         print('Spearman rho')
         vals = []
         for class_index in range(y_true.shape[-1]):
             vals.append(stats.spearmanr(y_true[:,class_index], y_score[:,class_index])[0])
-        print(np.array(vals))
+        spearman_aug = np.array(vals)
+        print(spearman_aug)
+        
+        # Store metrics for plotting
+        metrics_data['augmented'] = {
+            'pearson_r': pearson_aug,
+            'spearman_r': spearman_aug
+        }
     
     # STAGE 2: Fine-tuning on Original Data
     print("\n=== Stage 2: Fine-tuning on Original Data ===")
@@ -426,13 +682,21 @@ def main():
         vals = []
         for class_index in range(y_true_finetune.shape[-1]):
             vals.append(stats.pearsonr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
-        print(np.array(vals))
+        pearson_finetune = np.array(vals)
+        print(pearson_finetune)
         
         print('Fine-tuned Spearman rho')
         vals = []
         for class_index in range(y_true_finetune.shape[-1]):
             vals.append(stats.spearmanr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
-        print(np.array(vals))
+        spearman_finetune = np.array(vals)
+        print(spearman_finetune)
+        
+        # Store metrics for plotting
+        metrics_data['finetuned'] = {
+            'pearson_r': pearson_finetune,
+            'spearman_r': spearman_finetune
+        }
     else:
         print("✗ ERROR: Fine-tuned model was not saved!")
     
@@ -514,15 +778,31 @@ def main():
         vals = []
         for class_index in range(y_true_control.shape[-1]):
             vals.append(stats.pearsonr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
-        print(np.array(vals))
+        pearson_control = np.array(vals)
+        print(pearson_control)
         
-        print('Control Spearman rho')
+        print('Fine-tuned Spearman rho')
         vals = []
         for class_index in range(y_true_control.shape[-1]):
             vals.append(stats.spearmanr(y_true_control[:,class_index], y_score_control[:,class_index])[0])
-        print(np.array(vals))
+        spearman_control = np.array(vals)
+        print(spearman_control)
+        
+        # Store metrics for plotting
+        metrics_data['control'] = {
+            'pearson_r': pearson_control,
+            'spearman_r': spearman_control
+        }
     
     print("=== All training completed ===")
+    
+    # Create comparison plots if we have metrics data
+    if len(metrics_data) >= 2:  # Need at least 2 models to compare
+        print("\nCreating performance comparison plots...")
+        plot_metrics_comparison(metrics_data, plots_dir, expt_name)
+    else:
+        print("\nNot enough models trained to create comparison plots.")
+        print("Need at least 2 models to compare performance.")
     
     # Summary of saved models
     print("\n" + "="*50)
@@ -557,6 +837,7 @@ def main():
         print(f"  {model}")
     
     print(f"\nAll models saved to directory: {os.path.abspath(output_dir)}")
+    print(f"All plots saved to directory: {os.path.abspath(plots_dir)}")
     print("\nTwo-Stage Training Logic:")
     print("  1. Stage 1: Train with augmentations → Learn robust feature representations")
     print("  2. Stage 2: Fine-tune on original data → Remove bias, refine towards biology")
@@ -565,6 +846,10 @@ def main():
     print("  - Script automatically detects existing checkpoints")
     print("  - Skips training for models that already exist")
     print("  - Allows resuming from previous training sessions")
+    print("\nVisualization:")
+    print("  - Comprehensive performance comparison plots")
+    print("  - Individual model performance analysis")
+    print("  - Performance improvement analysis")
     print("="*50)
 
 
