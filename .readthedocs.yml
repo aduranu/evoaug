@@ -13,6 +13,11 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+  jobs:
+    pre_build:
+      - pip install --upgrade pip setuptools wheel
+      - pip install -r requirements.txt
+      - pip install -e .[docs]
 
 # Install the package in editable mode
 python:
@@ -24,12 +29,4 @@ python:
 
 # Set environment variables
 environment:
-  PYTHONPATH: $PYTHONPATH:$READTHEDOCS_PROJECT_DIR
-
-# Additional build steps
-build:
-  jobs:
-    pre_build:
-      - pip install --upgrade pip setuptools wheel
-      - pip install -r requirements.txt
-      - pip install -e .[docs] 
+  PYTHONPATH: $PYTHONPATH:$READTHEDOCS_PROJECT_DIR 
