@@ -1,33 +1,7 @@
 # Core dependencies for EvoAug2
 torch>=1.9.0
-torchvision>=0.10.0
 pytorch-lightning>=1.5.0
 numpy>=1.20.0
 scipy>=1.7.0
-scikit-learn>=1.0.0
 h5py>=3.1.0
-
-# Optional dependencies for examples and visualization
-# matplotlib>=3.3.0
-# seaborn>=0.11.0
-# jupyter>=1.0.0
-# ipywidgets>=7.6.0
-
-# Development dependencies (install with: pip install -e .[dev])
-# pytest>=6.0.0
-# pytest-cov>=2.0.0
-# black>=21.0.0
-# isort>=5.0.0
-# flake8>=3.8.0
-# mypy>=0.800.0
-# pre-commit>=2.15.0
-
-# Documentation dependencies (install with: pip install -e .[docs])
-# sphinx>=4.0.0
-# sphinx-rtd-theme>=1.0.0
-# sphinx-autodoc-typehints>=1.12.0
-# myst-parser>=0.15.0
-# nbsphinx>=0.8.0
-
-# Full installation (install with: pip install -e .[full])
-# Includes all optional dependencies for complete functionality 
+scikit-learn>=1.0.0 

@@ -1,36 +1,50 @@
-## EvoAug2: Evolution-inspired sequence augmentations as a DataLoader
+# EvoAug2
 
-EvoAug2 provides evolution-inspired data augmentations for genomic sequences and a simple way to use them with any PyTorch model via a drop-in DataLoader. It replaces the old model-wrapper approach with a lightweight dataset/loader that applies augmentations on-the-fly. The core design goal is to keep the output sequence length exactly equal to the input length L for every augmentation.
+EvoAug2 is a PyTorch package to pretrain sequence-based deep learning models for regulatory genomics with evolution-inspired data augmentations, followed by fine-tuning on the original, unperturbed data. The new version replaces the prior model-wrapper (`RobustModel`) with a loader-first design (`RobustLoader`) that applies augmentations on-the-fly within a drop-in `DataLoader`.
 
-- **Where to look**:
-  - `evoaug/augment.py`: augmentation implementations (length-preserving)
-  - `evoaug/evoaug.py`: `AugmentedGenomicDataset` and `RobustLoader`
-  - `example_training.py`: complete training script with Lightning integration and two-stage approach
+All augmentations are length-preserving: inputs with shape (N, A, L) always return outputs with the exact same shape.
 
-## What's new
-- **Loader-first design**: `RobustLoader` wraps any base dataset and applies augmentations stochastically per mini-batch, no model wrapper needed.
-- **Length-preserving augmentations**:
-  - **RandomDeletion**: deletes a contiguous segment and pads equally with random DNA to keep length L.
-  - **RandomInsertion**: inserts random DNA at a chosen index, then trims equally from both sequence ends so final length is exactly L.
-  - **RandomTranslocation**, **RandomInversion**, **RandomRC**, **RandomMutation**, **RandomNoise** all preserve input shape.
-- **Safer indexing**: all per-sequence lengths/indices are handled robustly for consistent slicing across PyTorch versions.
-- **Enhanced H5Dataset**: Integrated DataModule-like functionality for seamless integration with PyTorch Lightning.
-- **Two-stage training workflow**: Pretrain with augmentations, then fine-tune on original data for optimal performance.
-- **Checkpoint management**: Automatic detection and loading of existing checkpoints to avoid redundant training.
+For questions, email: koo@cshl.edu
+
+<img src="fig/augmentations.png" alt="fig" width="500"/>
+
+<img src="fig/overview.png" alt="overview" width="500"/>
+
 
 ## Install
+
 ```bash
 pip install evoaug
 ```
 
-## Dependencies
-- torch >= 1.12
-- lightning >= 2.0.0
-- numpy >= 1.21
 
-Note: This package uses the newer `lightning` package (`lightning.pytorch`). If you use older `pytorch_lightning`, adjust the `Trainer` call accordingly.
+## Dependencies
+
+```text
+torch >= 1.9.0
+pytorch-lightning >= 1.5.0
+numpy >= 1.20.0
+scipy >= 1.7.0
+h5py >= 3.1.0
+```
+
+Note: The examples use `pytorch_lightning` (imported as `import pytorch_lightning as pl`). If you use the newer `lightning.pytorch` package, adapt the `Trainer` import and arguments accordingly.
+
+
+## What changed (RobustModel → RobustLoader)
+
+- The training wrapper is no longer required. Instead of wrapping a model in `RobustModel`, EvoAug2 provides a `RobustLoader` that augments data during loading.
+- Works with any PyTorch model, any dataset returning `(sequence, target)` with `sequence` shaped as (A, L).
+- Augmentations can be toggled per-loader: `loader.enable_augmentations()` / `loader.disable_augmentations()`.
+- Fine-tuning stage is implemented by disabling augmentations on the same dataset/loader.
+
+Quick migration:
+- Before: wrap model with `evoaug.RobustModel(...)` and pass a normal DataLoader.
+- Now: create a `RobustLoader(base_dataset, augment_list, ...)` and pass the loader to your Trainer or training loop.
+
 
 ## Augmentations
+
 ```python
 from evoaug import augment
 
@@ -43,38 +57,32 @@ augment_list = [
     augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
 ]
 ```
-All transforms return tensors with the same shape as input `(N, A, L)`.
+All transforms keep sequence length exactly L and operate on batches shaped (N, A, L).
 
-## Using RobustLoader with PyTorch Lightning (DataModule)
 
-### Two-Stage Training Approach (Recommended)
+## Use case 1: Lightning DataModule over a base dataset
 
-The recommended workflow follows the EvoAug methodology:
-
-1. **Stage 1**: Train with EvoAug2 augmentations using `RobustLoader`
-2. **Stage 2**: Fine-tune on the original data (augmentations disabled)
-3. **Control**: Train a separate model on original data for baseline comparison
+This pattern mirrors `example_training.py` and is recommended for the two-stage workflow.
 
 ```python
-import lightning.pytorch as pl
+import pytorch_lightning as pl
 from evoaug.evoaug import RobustLoader
 from evoaug import augment
-from utils import utils
+from utils import utils  # provides H5Dataset with train/val/test splits
 
-# DeepSTARR optimal augmentation hyperparameters
+# Define augmentations (DeepSTARR-optimal shown in example_training.py)
 augment_list = [
-    augment.RandomDeletion(delete_min=0, delete_max=30),
+    # augment.RandomDeletion(delete_min=0, delete_max=30),
     augment.RandomTranslocation(shift_min=0, shift_max=20),
-    # RandomInsertion(insert_min=0, insert_max=20),  # Commented out if causing issues
+    # augment.RandomInsertion(insert_min=0, insert_max=20),
     augment.RandomRC(rc_prob=0.0),
     augment.RandomMutation(mut_frac=0.05),
     augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
 ]
 
-# Create enhanced H5Dataset (includes DataModule-like functionality)
-base_dataset = utils.H5Dataset(filepath, batch_size=batch_size, lower_case=False, transpose=False)
+# Base dataset (returns per-split datasets)
+base = utils.H5Dataset(filepath, batch_size=batch_size, lower_case=False, transpose=False)
 
-# Create augmented data module for Stage 1 training
 class AugmentedDataModule(pl.LightningDataModule):
     def __init__(self, base_dataset, augment_list, max_augs_per_seq, hard_aug):
         super().__init__()
@@ -82,137 +90,80 @@ class AugmentedDataModule(pl.LightningDataModule):
         self.augment_list = augment_list
         self.max_augs_per_seq = max_augs_per_seq
         self.hard_aug = hard_aug
-        
+
     def train_dataloader(self):
-        # Use RobustLoader with training dataset
-        train_dataset = self.base_dataset.get_train_dataset()
+        train_ds = self.base_dataset.get_train_dataset()
         return RobustLoader(
-            base_dataset=train_dataset,
+            base_dataset=train_ds,
             augment_list=self.augment_list,
             max_augs_per_seq=self.max_augs_per_seq,
             hard_aug=self.hard_aug,
             batch_size=self.base_dataset.batch_size,
-            shuffle=True
+            shuffle=True,
         )
-    
+
     def val_dataloader(self):
-        # Use RobustLoader with validation dataset and disable augmentations
-        val_dataset = self.base_dataset.get_val_dataset()
+        val_ds = self.base_dataset.get_val_dataset()
         loader = RobustLoader(
-            base_dataset=val_dataset,
+            base_dataset=val_ds,
             augment_list=self.augment_list,
             max_augs_per_seq=self.max_augs_per_seq,
             hard_aug=self.hard_aug,
             batch_size=self.base_dataset.batch_size,
-            shuffle=False
+            shuffle=False,
         )
-        loader.disable_augmentations()
+        loader.disable_augmentations()  # no augs for validation
         return loader
-    
+
     def test_dataloader(self):
-        # Use RobustLoader with test dataset and disable augmentations
-        test_dataset = self.base_dataset.get_test_dataset()
+        test_ds = self.base_dataset.get_test_dataset()
         loader = RobustLoader(
-            base_dataset=test_dataset,
+            base_dataset=test_ds,
             augment_list=self.augment_list,
             max_augs_per_seq=self.max_augs_per_seq,
             hard_aug=self.hard_aug,
             batch_size=self.base_dataset.batch_size,
-            shuffle=False
+            shuffle=False,
         )
-        loader.disable_augmentations()
+        loader.disable_augmentations()  # no augs for test
         return loader
 
-# Create augmented data module for Stage 1
-data_module = AugmentedDataModule(
-    base_dataset, 
-    augment_list, 
-    max_augs_per_seq=2,  # DeepSTARR optimal: maximum 2 augmentations per sequence
-    hard_aug=True         # DeepSTARR uses hard setting: always apply exactly 2 augmentations
-)
-
-# STAGE 1: Training with EvoAug2 Augmentations
-trainer = pl.Trainer(
-    max_epochs=100,
-    accelerator="auto",
-    devices="auto"
-)
-
+# Stage 1: pretrain with augmentations (e.g., 100 epochs)
+data_module = AugmentedDataModule(base, augment_list, max_augs_per_seq=2, hard_aug=True)
+trainer = pl.Trainer(max_epochs=100, accelerator='auto', devices='auto')
 trainer.fit(model, datamodule=data_module)
 
-# STAGE 2: Fine-tuning on Original Data
-# Create fine-tune data module (no augmentations)
+# Stage 2: fine-tune on original data (disable augmentations)
 class FineTuneDataModule(pl.LightningDataModule):
     def __init__(self, base_dataset):
         super().__init__()
         self.base_dataset = base_dataset
-        
     def train_dataloader(self):
         return self.base_dataset.train_dataloader()
-        
     def val_dataloader(self):
         return self.base_dataset.val_dataloader()
-        
     def test_dataloader(self):
         return self.base_dataset.test_dataloader()
 
-data_module_finetune = FineTuneDataModule(base_dataset)
-
-# Fine-tune for 5 epochs with lower learning rate
-trainer_finetune = pl.Trainer(
-    max_epochs=5,
-    accelerator="auto",
-    devices="auto"
-)
-
-trainer_finetune.fit(model_finetune, datamodule=data_module_finetune)
+finetune_dm = FineTuneDataModule(base)
+trainer_finetune = pl.Trainer(max_epochs=5, accelerator='auto', devices='auto')
+trainer_finetune.fit(model_finetune, datamodule=finetune_dm)
 ```
 
-### Checkpoint Management
 
-The training script automatically detects existing checkpoints and skips redundant training:
+## Use case 2: Vanilla PyTorch loop with RobustLoader
 
-```python
-def check_existing_checkpoints(output_dir, expt_name):
-    """Check for existing checkpoints and return their status."""
-    checkpoint_status = {
-        'augmented': {'exists': False, 'path': None, 'epochs': None},
-        'finetuned': {'exists': False, 'path': None, 'epochs': None},
-        'control': {'exists': False, 'path': None, 'epochs': None}
-    }
-    
-    # Check for augmented model checkpoint
-    aug_path = os.path.join(output_dir, f"{expt_name}_aug.ckpt")
-    if os.path.exists(aug_path):
-        checkpoint_status['augmented']['exists'] = True
-        checkpoint_status['augmented']['path'] = aug_path
-    
-    # Check for fine-tuned model checkpoint
-    finetune_path = os.path.join(output_dir, f"{expt_name}_finetune.ckpt")
-    if os.path.exists(finetune_path):
-        checkpoint_status['finetuned']['exists'] = True
-        checkpoint_status['finetuned']['path'] = finetune_path
-    
-    # Check for control model checkpoint
-    control_path = os.path.join(output_dir, f"{expt_name}_standard.ckpt")
-    if os.path.exists(control_path):
-        checkpoint_status['control']['exists'] = True
-        checkpoint_status['control']['path'] = control_path
-    
-    return checkpoint_status
-```
-
-## Using RobustLoader with a vanilla PyTorch training loop
 ```python
 from evoaug.evoaug import RobustLoader
 from evoaug import augment
 
-# Your base dataset must return (sequence, target) where sequence has shape (A, L)
+# Your dataset must return (sequence, target) with sequence shape (A, L)
 base_dataset = YourDataset(...)
 augment_list = [
-    augment.RandomDeletion(delete_min=0, delete_max=30),
     augment.RandomTranslocation(shift_min=0, shift_max=20),
-    augment.RandomInsertion(insert_min=0, insert_max=20),
+    augment.RandomRC(rc_prob=0.0),
+    augment.RandomMutation(mut_frac=0.05),
+    augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
 ]
 
 train_loader = RobustLoader(
@@ -222,14 +173,13 @@ train_loader = RobustLoader(
     hard_aug=True,
     batch_size=128,
     shuffle=True,
-    num_workers=4
+    num_workers=4,
 )
 
-# Standard PyTorch loop (model expects input (N, A, L))
 for epoch in range(num_epochs):
     model.train()
-    for x, y in train_loader:
-        x = x.to(device)      # (N, A, L)
+    for x, y in train_loader:  # x is (N, A, L)
+        x = x.to(device)
         y = y.to(device)
         optimizer.zero_grad()
         y_hat = model(x)
@@ -237,82 +187,87 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
-# Validation/test: use your original non-augmented loader or disable augmentations
+# Validation/test: either use your original non-augmented loader
+# or temporarily disable augmentations on the same loader
 # train_loader.disable_augmentations()
+# for x, y in val_loader: ...
 ```
 
-## Enhanced H5Dataset Integration
 
-The `H5Dataset` now includes DataModule-like functionality for seamless integration:
+## Optional: checkpointing and plotting
+
+EvoAug2 leaves checkpointing/plotting to user code. They are easy to add, and `example_training.py` shows complete, ready-to-use helpers.
+
+- Checkpoints (best-practice): use `pytorch_lightning` callbacks
 
 ```python
-from utils import utils
+import os
+import pytorch_lightning as pl
 
-# Create enhanced H5Dataset with DataModule-like methods
-base_dataset = utils.H5Dataset(
-    filepath, 
-    batch_size=batch_size, 
-    lower_case=False, 
-    transpose=False
+ckpt_name = f"{expt_name}_aug"
+ckpt_cb = pl.callbacks.ModelCheckpoint(
+    monitor='val_loss', save_top_k=1,
+    dirpath=output_dir, filename=ckpt_name,
 )
+trainer = pl.Trainer(callbacks=[ckpt_cb], max_epochs=100, accelerator='auto', devices='auto')
+# trainer.fit(...)
 
-# Access train/val/test datasets
-train_dataset = base_dataset.get_train_dataset()
-val_dataset = base_dataset.get_val_dataset()
-test_dataset = base_dataset.get_test_dataset()
-
-# Use with standard DataLoader or RobustLoader
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+best_ckpt_path = os.path.join(output_dir, ckpt_name + '.ckpt')
+# model = LightningModule.load_from_checkpoint(best_ckpt_path, model=model_arch)
 ```
 
-## Performance Visualization
-
-The training script automatically generates comprehensive performance comparison plots:
+- Skipping redundant runs: a minimal helper
 
 ```python
-def plot_metrics_comparison(metrics_data, plots_dir, expt_name):
-    """Create comprehensive plots comparing metrics across the three model types."""
-    
-    # 1. Correlation Metrics Comparison (Bar Plot)
-    # 2. Detailed Metrics by Class (Heatmap)
-    # 3. Performance Improvement Analysis
-    # 4. Model Comparison Summary
-    
-    # Plots are saved to the local 'plots/' directory
-    # Includes Pearson correlation, Spearman correlation, and class-wise analysis
+import os, torch
+
+def check_existing_checkpoints(output_dir, expt_name):
+    paths = {
+        'augmented': os.path.join(output_dir, f"{expt_name}_aug.ckpt"),
+        'finetuned': os.path.join(output_dir, f"{expt_name}_finetune.ckpt"),
+        'control':   os.path.join(output_dir, f"{expt_name}_standard.ckpt"),
+    }
+    return {k: (os.path.exists(p), p) for k, p in paths.items()}
 ```
+
+- Plotting performance: compute metrics (Pearson/Spearman) from predictions and create comparison plots with matplotlib/seaborn. See `example_training.py` for a comprehensive `plot_metrics_comparison(...)` implementation.
+
 
 ## API overview
+
 - `AugmentedGenomicDataset(base_dataset, augment_list, max_augs_per_seq=0, hard_aug=True, apply_augmentations=True)`
-  - Wraps an existing dataset and applies augmentations on-the-fly.
-  - `max_augs_per_seq`: maximum number of augmentations per sequence.
-  - `hard_aug=True`: always apply exactly `max_augs_per_seq` augmentations; otherwise a random number from 1..max is used.
-- `RobustLoader(...)`
-  - `enable_augmentations()` / `disable_augmentations()` to toggle augments (handy for finetuning).
-  - Preserves the original sequence length L for all transforms.
-- `H5Dataset(filepath, batch_size, lower_case=False, transpose=False)`
-  - Enhanced dataset class with DataModule-like functionality.
-  - `get_train_dataset()`, `get_val_dataset()`, `get_test_dataset()` methods.
-  - Seamless integration with PyTorch Lightning.
+  - Wraps any dataset and applies augmentations on-the-fly.
+  - `enable_augmentations()` / `disable_augmentations()` to toggle.
+- `RobustLoader(base_dataset, augment_list, max_augs_per_seq, hard_aug, batch_size, shuffle, num_workers, ...)`
+  - Inherits from `torch.utils.data.DataLoader`.
+  - `enable_augmentations()` / `disable_augmentations()` on the underlying dataset.
+  - `set_augmentations(augment_list, max_augs_per_seq, hard_aug)` to update settings without recreating the loader.
 
-## Tips and gotchas
-- If you use lazy modules (e.g., `nn.LazyLinear`), ensure train/val inputs have the same shape on the very first forward. With EvoAug2's length-preserving transforms, this should hold if your base datasets share the same L.
-- To avoid any lazy-module edge cases during sanity validation, you can set:
-```python
-pl.Trainer(num_sanity_val_steps=0, ...)
-```
-- Alternatively, replace lazy layers with fixed-shape heads (e.g., global average pooling + `nn.Linear`).
-- The `RandomInsertion` augmentation may be commented out in the example if it causes issues in your environment.
-- Use the two-stage training workflow for optimal performance: pretrain with augmentations, then fine-tune on original data.
+All augmentations preserve sequence length L for stable model shapes across training/validation.
 
-## Two-stage training workflow (recommended)
-1. **Pretrain with EvoAug2 augmentations** using `RobustLoader` (100 epochs).
-2. **Fine-tune on the original data** (5 epochs, lower learning rate).
-3. **Control comparison** with model trained on original data only.
 
-This follows the EvoAug methodology and typically improves robustness and generalization.
+## Two-stage workflow (recommended)
+
+1. Pretrain with EvoAug2 augmentations using `RobustLoader` (e.g., 100 epochs).
+2. Fine-tune the same architecture on original data with augmentations disabled (e.g., 5 epochs, lower LR).
+3. Optionally, train a control model on original data only for baseline comparison.
+
+This mirrors the EvoAug methodology and typically improves robustness and generalization.
+
 
 ## Reference
+
 - Paper: "EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations" (Genome Biology, 2023).
-- For questions: koo@cshl.edu 
+
+```bibtex
+@article{lee2023evoaug,
+  title={EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations},
+  author={Lee, Nicholas Keone and Tang, Ziqi and Toneyan, Shushan and Koo, Peter K},
+  journal={Genome Biology},
+  volume={24},
+  number={1},
+  pages={105},
+  year={2023},
+  publisher={Springer}
+}
+``` 

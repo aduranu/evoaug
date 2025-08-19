@@ -29,17 +29,15 @@ def read_requirements():
 setup(
     name="evoaug2",
     version="2.0.0",
-    author="EvoAug2 Development Team",
-    author_email="evoaug2@example.com",
-    description="Evolution-Inspired Data Augmentation for Genomic Sequences",
+    author="Peter K. Koo",
+    author_email="koo@cshl.edu",
+    description="Evolution-Inspired Data Augmentation for Genomic Sequences - DataLoader Version",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/evoaug2/evoaug2",
+    url="https://github.com/pkoo/evoaug2",
     project_urls={
-        "Bug Tracker": "https://github.com/evoaug2/evoaug2/issues",
-        "Documentation": "https://evoaug2.readthedocs.io/",
-        "Source Code": "https://github.com/evoaug2/evoaug2",
-        "Changelog": "https://github.com/evoaug2/evoaug2/blob/main/CHANGELOG.md",
+        "Bug Tracker": "https://github.com/pkoo/evoaug2/issues",
+        "Source Code": "https://github.com/pkoo/evoaug2",
     },
     packages=find_packages(include=['evoaug', 'evoaug.*', 'utils', 'utils.*']),
     classifiers=[
@@ -118,20 +116,15 @@ setup(
     ],
     include_package_data=True,
     package_data={
-        "evoaug": ["*.py", "*.pyi", "py.typed"],
+        "evoaug": ["*.py", "*.pyi"],
         "utils": ["*.py", "*.pyi"],
     },
     zip_safe=False,
-    entry_points={
-        "console_scripts": [
-            "evoaug2=evoaug.cli:main",
-        ],
-    },
     # Metadata for PyPI
     license="MIT",
     platforms=["any"],
-    maintainer="EvoAug2 Development Team",
-    maintainer_email="evoaug2@example.com",
+    maintainer="Peter K. Koo",
+    maintainer_email="koo@cshl.edu",
     
     # Additional metadata
     provides=["evoaug2"],
@@ -139,11 +132,5 @@ setup(
     setup_requires=[
         "setuptools>=45",
         "wheel",
-        "setuptools_scm[toml]>=6.2",
     ],
-    use_scm_version={
-        "write_to": "evoaug/_version.py",
-        "write_to_template": '__version__ = "{version}"',
-        "tag_regex": r"^(?P<prefix>v)?(?P<version>[^\+]+)(?P<suffix>.*)?$",
-    },
 )
