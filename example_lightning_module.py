@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-DeepSTARR Training Script with EvoAug2 DataLoader Version
+EvoAug2 PyTorch Lightning Example
 
-This script converts the Jupyter notebook to use evoaug2 with the dataloader version
-instead of the model wrapper approach. It also checks for existing checkpoints
-to avoid retraining already trained models and includes comprehensive plotting
-of training metrics for comparison.
+Complete training script with Lightning integration and two-stage approach.
+Shows DataModule creation, checkpoint management, and performance comparison.
+
+Usage: python example_lightning_module.py
 """
 
 import os
@@ -25,34 +25,14 @@ from scipy import stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Set device
+# Configuration
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-# Set PyTorch precision for better performance on Tensor Cores
 torch.set_float32_matmul_precision('medium')
-
-# Set plotting style
 plt.style.use('default')
 sns.set_palette("husl")
 
-
 def check_existing_checkpoints(output_dir, expt_name):
-    """
-    Check for existing checkpoints and return their status.
-    
-    Parameters
-    ----------
-    output_dir : str
-        Directory where checkpoints are saved.
-    expt_name : str
-        Base name for the experiment.
-        
-    Returns
-    -------
-    dict
-        Dictionary with checkpoint status and paths.
-    """
+    """Check for existing checkpoints and return their status."""
     checkpoint_status = {
         'augmented': {'exists': False, 'path': None, 'epochs': None},
         'finetuned': {'exists': False, 'path': None, 'epochs': None},
@@ -64,7 +44,6 @@ def check_existing_checkpoints(output_dir, expt_name):
     if os.path.exists(aug_path):
         checkpoint_status['augmented']['exists'] = True
         checkpoint_status['augmented']['path'] = aug_path
-        # Try to get epoch information from checkpoint
         try:
             checkpoint = torch.load(aug_path, map_location='cpu')
             if 'epoch' in checkpoint:
@@ -98,7 +77,6 @@ def check_existing_checkpoints(output_dir, expt_name):
     
     return checkpoint_status
 
-
 def print_checkpoint_status(checkpoint_status):
     """Print the status of existing checkpoints."""
     print("\n" + "="*50)
@@ -114,7 +92,6 @@ def print_checkpoint_status(checkpoint_status):
     
     print("="*50)
 
-
 def create_plots_directory():
     """Create plots directory if it doesn't exist."""
     plots_dir = "plots"
@@ -123,20 +100,8 @@ def create_plots_directory():
         print(f"Created plots directory: {plots_dir}")
     return plots_dir
 
-
 def plot_metrics_comparison(metrics_data, plots_dir, expt_name):
-    """
-    Create comprehensive plots comparing metrics across the three model types.
-    
-    Parameters
-    ----------
-    metrics_data : dict
-        Dictionary containing metrics for each model type.
-    plots_dir : str
-        Directory to save the plots.
-    expt_name : str
-        Name of the experiment for plot titles.
-    """
+    """Create comprehensive plots comparing metrics across the three model types."""
     print(f"\nCreating comparison plots in {plots_dir}/...")
     
     # Set up the plotting style
@@ -349,28 +314,8 @@ def plot_metrics_comparison(metrics_data, plots_dir, expt_name):
     print(f"  - {expt_name}_individual_performance.png") 
     print(f"  - {expt_name}_performance_summary.png")
 
-
 def main():
     """Main training function implementing the two-stage EvoAug2 approach"""
-    
-    print("="*70)
-    print("DEEPSTARR TRAINING WITH TWO-STAGE EVOAUG2 APPROACH")
-    print("="*70)
-    print("This script implements the research methodology described in your paper:")
-    print("")
-    print("STAGE 1: Train DNN with EvoAug augmentations applied stochastically online")
-    print("         → Goal: Learn robust representations of features (e.g., motifs)")
-    print("         → Method: Expose model to expanded genetic variation")
-    print("         → Expected: Preserve motifs on average while learning robustness")
-    print("")
-    print("STAGE 2: Fine-tune the augmented model on original, unperturbed data")
-    print("         → Goal: Remove augmentation bias and refine features")
-    print("         → Method: Continue training on original data with lower learning rate")
-    print("         → Expected: Guide function towards observed biology")
-    print("")
-    print("CONTROL: Train separate model on original data only (baseline comparison)")
-    print("="*70)
-    print("")
     
     # Configuration
     expt_name = 'DeepSTARR'
@@ -403,17 +348,6 @@ def main():
         RandomMutation(mut_frac=0.05),                    # DeepSTARR optimal: mutate_frac = 0.05
         RandomNoise(noise_mean=0, noise_std=0.3),        # DeepSTARR optimal: noise_std = 0.3
     ]
-    
-    print("Using DeepSTARR optimal augmentation hyperparameters:")
-    print("  - Deletion: delete_min=0, delete_max=30")
-    print("  - Translocation: shift_min=0, shift_max=20")
-    print("  - Insertion: insert_min=0, insert_max=20")
-    print("  - Reverse-complement: rc_prob=0.0 (disabled)")
-    print("  - Mutation: mutate_frac=0.05")
-    print("  - Noise: noise_mean=0, noise_std=0.3")
-    print("  - Max augmentations per sequence: 2")
-    print("  - Augmentation setting: Hard (always apply exactly 2 augmentations)")
-    print("  - Augmentation priority order: inversion, deletion, translocation, insertion, reverse-complement, mutation, noise")
     
     # Create enhanced H5Dataset (now includes DataModule-like functionality)
     base_dataset = utils.H5Dataset(filepath, batch_size=batch_size, lower_case=False, transpose=False)
@@ -696,7 +630,7 @@ def main():
             for class_index in range(y_true_finetune.shape[-1]):
                 vals.append(stats.spearmanr(y_true_finetune[:,class_index], y_score_finetune[:,class_index])[0])
             spearman_finetune = np.array(vals)
-            print(spearman_finetune)
+            print(pearson_finetune)
             
             # Store metrics for plotting
             metrics_data['finetuned'] = {
@@ -853,19 +787,6 @@ def main():
     
     print(f"\nAll models saved to directory: {os.path.abspath(output_dir)}")
     print(f"All plots saved to directory: {os.path.abspath(plots_dir)}")
-    print("\nTwo-Stage Training Logic:")
-    print("  1. Stage 1: Train with augmentations → Learn robust feature representations")
-    print("  2. Stage 2: Fine-tune on original data → Remove bias, refine towards biology")
-    print("  3. Control: Train on original data only → Baseline comparison")
-    print("\nCheckpoint Usage:")
-    print("  - Script automatically detects existing checkpoints")
-    print("  - Skips training for models that already exist")
-    print("  - Allows resuming from previous training sessions")
-    print("\nVisualization:")
-    print("  - Comprehensive performance comparison plots")
-    print("  - Individual model performance analysis")
-    print("  - Performance improvement analysis")
-    print("="*50)
 
 
 if __name__ == "__main__":
