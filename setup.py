@@ -28,16 +28,16 @@ def read_requirements():
 # Package configuration
 setup(
     name="evoaug2",
-    version="2.0.1",
+    version="2.0.3", # Updated to match README
     author="Peter K. Koo",
     author_email="koo@cshl.edu",
     description="Evolution-Inspired Data Augmentation for Genomic Sequences - DataLoader Version",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/aduranu/evoaug2",
+    url="https://github.com/aduranu/evoaug",
     project_urls={
-        "Bug Tracker": "https://github.com/aduranu/evoaug2/issues",
-        "Source Code": "https://github.com/aduranu/evoaug2",
+        "Bug Tracker": "https://github.com/aduranu/evoaug/issues",
+        "Source Code": "https://github.com/aduranu/evoaug",
     },
     packages=find_packages(include=['evoaug', 'evoaug.*', 'utils', 'utils.*']),
     classifiers=[
