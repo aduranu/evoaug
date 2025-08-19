@@ -1,0 +1,23 @@
+# Documentation dependencies for EvoAug2
+# These packages are required to build the Sphinx documentation
+
+# Core Sphinx
+sphinx>=4.0.0
+
+# Sphinx themes and extensions
+sphinx-rtd-theme>=1.0.0
+sphinx-autodoc-typehints>=1.12.0
+myst-parser>=0.15.0
+
+# Additional extensions (these are built into Sphinx, no need to install separately)
+# sphinx.ext.napoleon - built into Sphinx
+# sphinx.ext.viewcode - built into Sphinx  
+# sphinx.ext.intersphinx - built into Sphinx
+# sphinx.ext.mathjax - built into Sphinx
+
+# Optional: for better code highlighting
+pygments>=2.10.0
+
+# Optional: for Jupyter notebook support
+nbsphinx>=0.8.0
+ipykernel>=6.0.0 
