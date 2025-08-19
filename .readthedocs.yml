@@ -27,6 +27,5 @@ python:
       extra_requirements:
         - docs
 
-# Set environment variables
-environment:
-  PYTHONPATH: $PYTHONPATH:$READTHEDOCS_PROJECT_DIR 
+# Note: PYTHONPATH is automatically set by Read the Docs
+# No need to configure environment variables manually 
