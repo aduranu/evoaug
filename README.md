@@ -17,6 +17,51 @@ For questions, email: koo@cshl.edu
 pip install evoaug2
 ```
 
+## Installation Options
+
+### **Option 1: Install from PyPI (Recommended)**
+
+```bash
+# Install the latest stable release
+pip install evoaug2
+
+# Install with specific version
+pip install evoaug2==2.0.0
+
+# Install with optional dependencies for examples
+pip install evoaug2[examples]
+
+# Install with all optional dependencies
+pip install evoaug2[full]
+```
+
+### **Option 2: Install from Source (Development)**
+
+```bash
+# Clone the repository
+git clone https://github.com/pkoo/evoaug2.git
+cd evoaug2
+
+# Install in development mode
+pip install -e .
+
+# Or install with development dependencies
+pip install -e .[dev]
+```
+
+### **Option 3: Install with Conda/Mamba**
+
+```bash
+# Create a new environment (recommended)
+conda create -n evoaug2 python=3.8
+conda activate evoaug2
+
+# Install PyTorch first (choose appropriate version)
+conda install pytorch pytorch-cuda=11.8 -c pytorch -c nvidia
+
+# Install EvoAug2
+pip install evoaug2
+```
 
 ## Dependencies
 
@@ -26,10 +71,106 @@ pytorch-lightning >= 1.5.0
 numpy >= 1.20.0
 scipy >= 1.7.0
 h5py >= 3.1.0
+scikit-learn >= 1.0.0
 ```
 
 Note: The examples use `pytorch_lightning` (imported as `import pytorch_lightning as pl`). If you use the newer `lightning.pytorch` package, adapt the `Trainer` import and arguments accordingly.
 
+## Quick Start
+
+```python
+# Install the package
+pip install evoaug2
+
+# Import and use
+from evoaug import evoaug, augment
+from utils import utils
+
+# Create augmentations
+augment_list = [
+    augment.RandomDeletion(delete_min=0, delete_max=20),
+    augment.RandomRC(rc_prob=0.5),
+    augment.RandomMutation(mut_frac=0.05),
+]
+
+# Create a RobustLoader
+loader = evoaug.RobustLoader(
+    base_dataset=your_dataset,
+    augment_list=augment_list,
+    max_augs_per_seq=2,
+    hard_aug=True,
+    batch_size=32
+)
+
+# Use in training
+for x, y in loader:
+    # x has shape (N, A, L) with augmentations applied
+    # Your training code here
+    pass
+```
+
+## Troubleshooting
+
+### **Common Issues**
+
+**Import Error: No module named 'evoaug'**
+```bash
+# Make sure you installed the correct package name
+pip install evoaug2  # NOT evoaug
+```
+
+**CUDA/GPU Issues**
+```bash
+# Install PyTorch with CUDA support first
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Then install EvoAug2
+pip install evoaug2
+```
+
+**Version Conflicts**
+```bash
+# Create a clean environment
+conda create -n evoaug2 python=3.8
+conda activate evoaug2
+pip install evoaug2
+```
+
+**Memory Issues with Large Datasets**
+```python
+# Reduce batch size or use gradient accumulation
+loader = evoaug.RobustLoader(
+    base_dataset=dataset,
+    augment_list=augment_list,
+    batch_size=16,  # Reduce from 32
+    num_workers=2   # Reduce workers if needed
+)
+```
+
+### **Getting Help**
+
+- **GitHub Issues**: Report bugs at https://github.com/pkoo/evoaug2/issues
+- **Email**: koo@cshl.edu
+- **Documentation**: See `example_training.py` for complete usage examples
+
+## Package Structure
+
+```
+evoaug2/
+├── evoaug/                 # Core augmentation package
+│   ├── __init__.py         # Package exports
+│   ├── augment.py          # Augmentation implementations
+│   └── evoaug.py           # RobustLoader and dataset classes
+├── utils/                   # Utility functions
+│   ├── __init__.py         # Utility exports
+│   ├── model_zoo.py        # Model architectures
+│   └── utils.py            # H5Dataset and evaluation tools
+├── example_training.py      # Complete training example
+├── setup.py                 # Package configuration
+├── pyproject.toml          # Modern Python packaging
+├── requirements.txt         # Core dependencies
+└── README.md               # This file
+```
 
 ## What changed (RobustModel → RobustLoader)
 
