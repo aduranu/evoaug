@@ -269,7 +269,14 @@ conda activate evoaug2
 pip install evoaug2
 ```
 
-
+**Memory Issues with Large Datasets**
+```python
+# Reduce batch size or use gradient accumulation
+loader = evoaug.RobustLoader(
+    base_dataset=dataset,
+    augment_list=augment_list,
+    batch_size=16,  # Reduce from 32
+    num_workers=2   # Reduce workers if needed
 )
 ```
 
