@@ -55,8 +55,6 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Software Development :: Libraries",
-        "Framework :: PyTorch",
-        "Framework :: PyTorch Lightning",
     ],
     python_requires=">=3.8",
     install_requires=read_requirements(),

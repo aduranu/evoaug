@@ -14,7 +14,7 @@ For questions, email: koo@cshl.edu
 ## Install
 
 ```bash
-pip install evoaug
+pip install evoaug2
 ```
 
 
