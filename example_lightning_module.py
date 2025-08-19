@@ -5,7 +5,35 @@ EvoAug2 PyTorch Lightning Example
 Complete training script with Lightning integration and two-stage approach.
 Shows DataModule creation, checkpoint management, and performance comparison.
 
-Usage: python example_lightning_module.py
+This script demonstrates the complete EvoAug2 workflow including:
+
+1. **Stage 1**: Training with evolution-inspired augmentations
+2. **Stage 2**: Fine-tuning on original data to remove augmentation bias
+3. **Control**: Standard training without augmentations for comparison
+4. **Evaluation**: Comprehensive performance analysis and visualization
+
+Usage
+-----
+    python example_lightning_module.py
+
+Prerequisites
+------------
+- PyTorch >= 1.9.0
+- PyTorch Lightning >= 1.5.0
+- DeepSTARR dataset (automatically downloaded if not present)
+- GPU recommended for training
+
+Outputs
+-------
+- Trained model checkpoints (.ckpt files)
+- Performance comparison plots (.png files)
+- Training logs and evaluation metrics
+
+See Also
+--------
+- :doc:`examples/lightning_module` for detailed documentation
+- :doc:`quickstart` for basic usage instructions
+- :doc:`user_guide/training` for training strategies
 """
 
 import os
@@ -32,7 +60,37 @@ plt.style.use('default')
 sns.set_palette("husl")
 
 def check_existing_checkpoints(output_dir, expt_name):
-    """Check for existing checkpoints and return their status."""
+    """Check for existing checkpoints and return their status.
+    
+    This function scans the output directory for existing model checkpoints
+    and returns information about their availability and training progress.
+    
+    Parameters
+    ----------
+    output_dir : str
+        Directory path where checkpoints are stored
+    expt_name : str
+        Base name for the experiment (e.g., 'DeepSTARR')
+    
+    Returns
+    -------
+    dict
+        Dictionary containing checkpoint status for each training stage:
+        - 'augmented': Stage 1 model checkpoint status
+        - 'finetuned': Stage 2 model checkpoint status  
+        - 'control': Control model checkpoint status
+        
+        Each stage contains:
+        - 'exists': Boolean indicating if checkpoint exists
+        - 'path': Full path to checkpoint file (if exists)
+        - 'epochs': Number of training epochs completed (if available)
+    
+    Examples
+    --------
+    >>> status = check_existing_checkpoints('/path/to/output', 'DeepSTARR')
+    >>> if status['augmented']['exists']:
+    ...     print(f"Found augmented model: {status['augmented']['path']}")
+    """
     checkpoint_status = {
         'augmented': {'exists': False, 'path': None, 'epochs': None},
         'finetuned': {'exists': False, 'path': None, 'epochs': None},
@@ -78,7 +136,28 @@ def check_existing_checkpoints(output_dir, expt_name):
     return checkpoint_status
 
 def print_checkpoint_status(checkpoint_status):
-    """Print the status of existing checkpoints."""
+    """Print the status of existing checkpoints.
+    
+    Displays a formatted summary of checkpoint availability and training progress
+    for each training stage.
+    
+    Parameters
+    ----------
+    checkpoint_status : dict
+        Dictionary returned by :func:`check_existing_checkpoints`
+    
+    Examples
+    --------
+    >>> status = check_existing_checkpoints('/path/to/output', 'DeepSTARR')
+    >>> print_checkpoint_status(status)
+    ==================================================
+    EXISTING CHECKPOINT STATUS
+    ==================================================
+    ✓ Augmented model: DeepSTARR_aug.ckpt (epochs: 100)
+    ✗ Finetuned model: NOT FOUND
+    ✓ Control model: DeepSTARR_standard.ckpt (epochs: 95)
+    ==================================================
+    """
     print("\n" + "="*50)
     print("EXISTING CHECKPOINT STATUS")
     print("="*50)
@@ -93,7 +172,23 @@ def print_checkpoint_status(checkpoint_status):
     print("="*50)
 
 def create_plots_directory():
-    """Create plots directory if it doesn't exist."""
+    """Create plots directory if it doesn't exist.
+    
+    Creates a 'plots' directory in the current working directory
+    for storing generated visualization files.
+    
+    Returns
+    -------
+    str
+        Path to the created plots directory
+    
+    Examples
+    --------
+    >>> plots_dir = create_plots_directory()
+    Created plots directory: plots
+    >>> print(plots_dir)
+    plots
+    """
     plots_dir = "plots"
     if not os.path.exists(plots_dir):
         os.makedirs(plots_dir)
@@ -315,7 +410,44 @@ def plot_metrics_comparison(metrics_data, plots_dir, expt_name):
     print(f"  - {expt_name}_performance_summary.png")
 
 def main():
-    """Main training function implementing the two-stage EvoAug2 approach"""
+    """Main training function implementing the two-stage EvoAug2 approach.
+    
+    This function orchestrates the complete EvoAug2 training workflow:
+    
+    1. **Stage 1 - Augmentation Training**: Trains a model using evolution-inspired
+       data augmentations to learn robust feature representations
+    2. **Stage 2 - Fine-tuning**: Fine-tunes the augmented model on original,
+       unperturbed data to remove augmentation bias
+    3. **Control Training**: Trains a baseline model without augmentations
+       for performance comparison
+    4. **Evaluation**: Compares performance across all three approaches
+       and generates comprehensive visualizations
+    
+    The function automatically handles checkpoint management, allowing training
+    to resume from any stage if interrupted.
+    
+    Configuration
+    -------------
+    The function uses the following default configuration (modifiable):
+    
+    - **Experiment**: DeepSTARR regulatory sequence prediction
+    - **Augmentations**: Translocation, mutation, noise (optimal parameters)
+    - **Training**: 100 epochs Stage 1, 5 epochs Stage 2
+    - **Batch Size**: 128
+    - **Learning Rate**: 0.001 (Stage 1), 0.0001 (Stage 2)
+    
+    Outputs
+    --------
+    - Model checkpoints for each training stage
+    - Performance comparison plots and metrics
+    - Training logs and evaluation results
+    
+    See Also
+    --------
+    - :doc:`user_guide/training` for detailed training explanations
+    - :doc:`examples/lightning_module` for usage examples
+    - :doc:`api/evoaug` for API reference
+    """
     
     # Configuration
     expt_name = 'DeepSTARR'
