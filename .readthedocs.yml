@@ -27,26 +27,7 @@ environment:
   PYTHONPATH: $PYTHONPATH:$READTHEDOCS_PROJECT_DIR
 
 # Additional build steps
-build_jobs:
-  - name: Install dependencies
-    commands:
-      - pip install -r requirements.txt
-      - pip install -e .[docs]
-
-# Python packages to install
-python:
-  install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
-      editable_install: true
-
-# Additional build steps
 build:
-  os: ubuntu-22.04
-  tools:
-    python: "3.11"
   jobs:
     pre_build:
       - pip install --upgrade pip setuptools wheel
