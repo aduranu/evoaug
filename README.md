@@ -1,8 +1,15 @@
 # EvoAug2
 
+[![PyPI version](https://badge.fury.io/py/evoaug2.svg)](https://badge.fury.io/py/evoaug2)
+[![Documentation](https://readthedocs.org/projects/evoaug2/badge/?version=latest)](https://evoaug2.readthedocs.io/en/latest/?badge=latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
 EvoAug2 is a PyTorch package to pretrain sequence-based deep learning models for regulatory genomics with evolution-inspired data augmentations, followed by fine-tuning on the original, unperturbed data. The new version replaces the prior model-wrapper (`RobustModel`) with a loader-first design (`RobustLoader`) that applies augmentations on-the-fly within a drop-in `DataLoader`.
 
 All augmentations are length-preserving: inputs with shape (N, A, L) always return outputs with the exact same shape.
+
+**📚 [Read the Documentation](https://evoaug2.readthedocs.io/en/latest/)**
 
 For questions, email: koo@cshl.edu
 
@@ -74,6 +81,16 @@ scikit-learn >= 1.0.0
 ```
 
 Note: The examples use `pytorch_lightning` (imported as `import pytorch_lightning as pl`). If you use the newer `lightning.pytorch` package, adapt the `Trainer` import and arguments accordingly.
+
+## Documentation
+
+📚 **Full documentation is available at [evoaug2.readthedocs.io](https://evoaug2.readthedocs.io/en/latest/)**
+
+The documentation includes:
+- **User Guide**: Installation, configuration, and usage examples
+- **API Reference**: Complete API documentation for all classes and functions
+- **Examples**: Detailed examples with PyTorch Lightning and vanilla PyTorch
+- **Advanced Topics**: Architecture details and customization options
 
 ## Quick Start
 
