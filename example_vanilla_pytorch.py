@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from evoaug.evoaug import RobustLoader
 from evoaug import augment
-from utils import utils
+from evoaug_utils import utils
 
 # Configuration
 filepath = '/grid/koo/home/duran/ray_results/deepstarr-data.h5'

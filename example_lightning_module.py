@@ -47,8 +47,8 @@ from evoaug.augment import (
     RandomTranslocation, RandomMutation, RandomNoise
 )
 from evoaug.evoaug import RobustLoader
-from utils.model_zoo import DeepSTARRModel, DeepSTARR
-from utils import utils
+from evoaug_utils.model_zoo import DeepSTARRModel, DeepSTARR
+from evoaug_utils import utils
 from scipy import stats
 import matplotlib.pyplot as plt
 import seaborn as sns

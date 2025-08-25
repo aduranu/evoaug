@@ -100,7 +100,7 @@ pip install evoaug2
 
 # Import and use
 from evoaug import evoaug, augment
-from utils import utils
+from evoaug_utils import utils
 
 # Create augmentations
 augment_list = [
@@ -311,7 +311,7 @@ evoaug2/
 │   ├── __init__.py         # Package exports
 │   ├── augment.py          # Augmentation implementations
 │   └── evoaug.py           # RobustLoader and dataset classes
-├── utils/                   # Utility functions
+├── evoaug_utils/           # Utility functions
 │   ├── __init__.py         # Utility exports
 │   ├── model_zoo.py        # Model architectures
 │   └── utils.py            # H5Dataset and evaluation tools

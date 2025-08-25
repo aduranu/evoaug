@@ -19,8 +19,8 @@ sys.path.insert(0, os.path.abspath('..'))
 project = 'EvoAug2'
 copyright = '2024, Peter K. Koo'
 author = 'Peter K. Koo'
-release = '2.0.3'
-version = '2.0.3'
+release = '2.0.4'
+version = '2.0.4'
 
 # -- General configuration ---------------------------------------------------
 

@@ -76,7 +76,7 @@ Running the Examples
    wget https://zenodo.org/record/7265991/files/DeepSTARR_data.h5
    
    # Or use the provided script
-   python -c "from utils import utils; utils.download_deepstarr_data()"
+   python -c "from evoaug_utils import utils; utils.download_deepstarr_data()"
 
 **Run Lightning Example:**
 
@@ -149,7 +149,7 @@ Customizing Examples
 .. code-block:: python
 
    # Load your own data
-   from utils import utils
+   from evoaug_utils import utils
    
    # Custom H5Dataset
    dataset = utils.H5Dataset(

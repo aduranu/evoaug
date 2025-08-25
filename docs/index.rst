@@ -31,36 +31,11 @@ Welcome to EvoAug2, a Python package that provides evolution-inspired data augme
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide
-
-   user_guide/overview
-   user_guide/augmentations
-   user_guide/training
-   user_guide/integration
-
-.. toctree::
-   :maxdepth: 2
    :caption: API Reference
 
    api/evoaug
-   api/utils
+   api/evoaug_utils
    api/examples
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Advanced Topics
-
-   advanced/architecture
-   advanced/performance
-   advanced/troubleshooting
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Development
-
-   development/contributing
-   development/changelog
-   development/citing
 
 .. toctree::
    :maxdepth: 2

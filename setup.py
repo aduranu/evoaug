@@ -28,7 +28,7 @@ def read_requirements():
 # Package configuration
 setup(
     name="evoaug2",
-    version="2.0.3", # Updated to match README
+    version="2.0.4", # Updated to match README
     author="Peter K. Koo",
     author_email="koo@cshl.edu",
     description="Evolution-Inspired Data Augmentation for Genomic Sequences - DataLoader Version",
@@ -39,7 +39,7 @@ setup(
         "Bug Tracker": "https://github.com/aduranu/evoaug/issues",
         "Source Code": "https://github.com/aduranu/evoaug",
     },
-    packages=find_packages(include=['evoaug', 'evoaug.*', 'utils', 'utils.*']),
+    packages=find_packages(include=['evoaug', 'evoaug.*', 'evoaug_utils', 'evoaug_utils.*']),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
@@ -115,7 +115,7 @@ setup(
     include_package_data=True,
     package_data={
         "evoaug": ["*.py", "*.pyi"],
-        "utils": ["*.py", "*.pyi"],
+        "evoaug_utils": ["*.py", "*.pyi"],
     },
     zip_safe=False,
     # Metadata for PyPI

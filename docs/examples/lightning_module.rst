@@ -321,7 +321,7 @@ Customization
 .. code-block:: python
 
    # Use different model architecture
-   from utils.model_zoo import YourCustomModel
+   from evoaug_utils.model_zoo import YourCustomModel
    model = YourCustomModel(num_classes=2)
 
 Troubleshooting

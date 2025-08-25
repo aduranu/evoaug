@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evoaug2"
-version = "2.0.3"
+version = "2.0.4"
 description = "Evolution-Inspired Data Augmentation for Genomic Sequences - DataLoader Version"
 readme = "README.md"
 license = {text = "MIT"}
@@ -79,4 +79,4 @@ Repository = "https://github.com/aduranu/evoaug"
 Issues = "https://github.com/aduranu/evoaug/issues"
 
 [tool.setuptools.packages.find]
-include = ["evoaug*", "utils*"] 
+include = ["evoaug*", "evoaug_utils*"] 
