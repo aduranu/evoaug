@@ -1,125 +1,168 @@
 # EvoAug
 
-EvoAug is a PyTorch package to pretrain sequence-based deep learning models for regulatory genomics data with evolution-inspired data augmentations followed by a finetuning on the original, unperturbed sequence data. This work uses PyTorch Lightning -- LightningModule -- to define a model wrapper that is used for training. This is work that directly follows from "EvoAug: improving generalization and interpretability of genomic deep neural networks with evolution-inspired data augmentations" by Nicholas Keone Lee, Ziqi (Amber) Tang, Shushan Toneyan, and Peter K Koo. Code in this repository is shared under the MIT License. For additional information, see documentation on [EvoAug.ReadTheDocs.io](https://evoaug.readthedocs.io/en/latest/index.html).
+[![PyPI version](https://badge.fury.io/py/evoaug.svg)](https://pypi.org/project/evoaug/)
+[![Documentation Status](https://readthedocs.org/projects/evoaug/badge/?version=latest)](https://evoaug.readthedocs.io/en/latest/?badge=latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
+EvoAug is a PyTorch package to pretrain sequence-based deep learning models for
+regulatory genomics with evolution-inspired data augmentations, followed by
+fine-tuning on the original, unperturbed sequence data.
+
+**Starting in v2.0**, the recommended API is `RobustLoader` — a drop-in
+`torch.utils.data.DataLoader` that applies augmentations on-the-fly. The v1
+`RobustModel` Lightning-wrapper interface remains available under
+`evoaug.legacy` for backwards compatibility. See
+[CHANGELOG.md](CHANGELOG.md) for the migration guide.
+
+This work follows from *"EvoAug: improving generalization and interpretability
+of genomic deep neural networks with evolution-inspired data augmentations"*
+(Lee, Tang, Toneyan, and Koo, **Genome Biology**, 2023).
 
 For questions, email: koo@cshl.edu
 
-<img src="fig/augmentations.png" alt="fig" width="500"/>
+<img src="fig/augmentations.png" alt="augmentations" width="500"/>
 
 <img src="fig/overview.png" alt="overview" width="500"/>
 
+## Install
 
-
-#### Install:
-
-```
+```bash
 pip install evoaug
 ```
 
+### From source
 
-#### Dependencies:
-
+```bash
+git clone https://github.com/p-koo/evoaug.git
+cd evoaug
+pip install -e .
 ```
-torch 1.12.1+cu113
+
+### Optional extras
+
+```bash
+pip install evoaug[examples]   # matplotlib, seaborn, jupyter
+pip install evoaug[docs]       # sphinx + rtd theme
+pip install evoaug[full]       # everything above
+```
+
+## Dependencies
+
+```text
+torch >= 1.9.0
 lightning >= 2.0.0
-numpy 1.21.6
+numpy >= 1.20.0
+scipy >= 1.7.0
+h5py >= 3.1.0
+scikit-learn >= 1.0.0
 ```
 
-Note: This package has been updated to use the newer `lightning` package instead of `pytorch_lightning`. For older versions that use pytorch_lightning, the pl.Trainer call will need to be modified accordingly as the arguments for gpus has changed from version 1.7.
-
-#### Example
+## Quick start (v2)
 
 ```python
-from evoaug import evoaug, augment
-import lightning.pytorch as pl
-
-model = "DEFINE PYTORCH MODEL"
-loss = "DEFINE PYTORCH LOSS"
-optimizer_dict = "DEFINE OPTIMIZER OR OPTIMIZER DICT"
+from evoaug import RobustLoader, augment
 
 augment_list = [
-	augment.RandomDeletion(delete_min=0, delete_max=20),
-	augment.RandomRC(rc_prob=0.5),
-	augment.RandomInsertion(insert_min=0, insert_max=20),
-	augment.RandomTranslocation(shift_min=0, shift_max=20),
-	augment.RandomMutation(mut_frac=0.05),
-	augment.RandomNoise(noise_mean=0, noise_std=0.2),
+    augment.RandomDeletion(delete_min=0, delete_max=20),
+    augment.RandomRC(rc_prob=0.5),
+    augment.RandomMutation(mut_frac=0.05),
 ]
 
-robust_model = evoaug.RobustModel(
-	model,
-	criterion=loss,
-	optimizer=optimizer_dict,
-	augment_list=augment_list,
-	max_augs_per_seq=2,  # maximum number of augmentations per sequence
-	hard_aug=True,  # use max_augs_per_seq, otherwise sample randomly up to max
-	inference_aug=False  # if true, keep augmentations on during inference time
+loader = RobustLoader(
+    base_dataset=your_dataset,        # yields (sequence, target), sequence shape (A, L)
+    augment_list=augment_list,
+    max_augs_per_seq=2,
+    hard_aug=True,
+    batch_size=128,
+    shuffle=True,
 )
 
-# set up callback
-callback_topmodel = pl.callbacks.ModelCheckpoint(
-	monitor='val_loss',
-	save_top_k=1,
-	dirpath=output_dir,
-	filename=ckpt_aug_path
-)
-
-# train model
-trainer = pl.Trainer(
-	accelerator="gpu",
-	devices=1,
-	max_epochs=100,
-	logger=None,
-	callbacks=["ADD CALLBACKS", callback_topmodel]
-)
-
-# pre-train model with augmentations
-trainer.fit(robust_model, datamodule=data_module)
-
-# load best model
-robust_model = evoaug.load_model_from_checkpoint(robust_model, ckpt_aug_path)
-
-# set up fine-tuning
-robust_model.finetune = True
-robust_model.optimizer = # set up optimizer for fine-tuning
-
-# set up callback
-callback_topmodel = pl.callbacks.ModelCheckpoint(
-	monitor='val_loss',
-	save_top_k=1,
-	dirpath=output_dir,
-	filename=ckpt_finetune_path
-)
-
-# set up pytorch lightning trainer
-trainer = pl.Trainer(
-	accelerator="gpu",
-	devices=1,
-	max_epochs=100,
-	logger=None,
-	callbacks=["ADD CALLBACKS", callback_topmodel]
-)
-
-# fine-tune model
-trainer.fit(robust_model, datamodule=data_module)
-
-# load best fine-tuned model
-robust_model = evoaug.load_model_from_checkpoint(robust_model, ckpt_finetune_path)
+for x, y in loader:
+    # x has shape (N, A, L), augmentations already applied
+    ...
 ```
 
+All augmentations are length-preserving: input shape `(N, A, L)` always returns
+output shape `(N, A, L)`.
 
-#### Examples on Google Colab:
+### Two-stage training (recommended)
 
-DeepSTARR analysis:
-- Example analysis: https://colab.research.google.com/drive/1a2fiRPBd1xvoJf0WNiMUgTYiLTs1XETf?usp=sharing
-- Example load model and perform attribution analysis: https://colab.research.google.com/drive/11DVkhyX2VhhCSbCGkW3XjviMxTufBvZh?usp=sharing
+```python
+# Stage 1 — pretrain with augmentations
+loader.enable_augmentations()
+trainer.fit(model, train_dataloaders=loader)
 
-ChIP-seq analysis:
-- Example analysis: https://colab.research.google.com/drive/1GZ8v4Tq3LQMZI30qvdhF7ZW6Kf5GDyKX?usp=sharing
+# Stage 2 — fine-tune on original data with the same loader
+loader.disable_augmentations()
+trainer_ft.fit(model, train_dataloaders=loader)
+```
 
-# Citation
+This mirrors the EvoAug methodology and typically improves robustness and
+generalization.
 
-If you find out work useful, please cite our paper.
+## Legacy v1 API (`RobustModel`)
+
+The pre-2.0 Lightning-wrapper API is preserved under `evoaug.legacy`:
+
+```python
+from evoaug.legacy import RobustModel
+
+robust_model = RobustModel(
+    model,
+    criterion=loss,
+    optimizer=optimizer_dict,
+    augment_list=augment_list,
+    max_augs_per_seq=2,
+    hard_aug=True,
+    inference_aug=False,
+)
+trainer.fit(robust_model, datamodule=data_module)
+```
+
+Old import paths (`from evoaug import RobustModel`,
+`from evoaug.evoaug import RobustModel`) continue to work in v2.x but emit a
+`DeprecationWarning`. They will be removed in a future major release.
+
+## Augmentations
+
+```python
+from evoaug import augment
+
+augment_list = [
+    augment.RandomDeletion(delete_min=0, delete_max=30),
+    augment.RandomTranslocation(shift_min=0, shift_max=20),
+    augment.RandomInsertion(insert_min=0, insert_max=20),
+    augment.RandomRC(rc_prob=0.0),
+    augment.RandomMutation(mut_frac=0.05),
+    augment.RandomNoise(noise_mean=0.0, noise_std=0.3),
+]
+```
+
+## Package layout
+
+```
+evoaug/
+├── augment.py         # Length-preserving augmentations
+├── loader.py          # RobustLoader, AugmentedGenomicDataset (v2 API)
+├── utils.py           # H5Dataset, evaluation helpers
+├── model_zoo.py       # DeepSTARR, Basset, generic CNN
+└── legacy/            # v1 RobustModel API
+    └── evoaug.py
+```
+
+## Documentation
+
+Full documentation:
+[evoaug.readthedocs.io](https://evoaug.readthedocs.io/en/latest/).
+
+## Examples
+
+- `examples/lightning_module.py` — full Lightning training loop with two-stage
+  workflow.
+- `examples/vanilla_pytorch.py` — minimal PyTorch training loop, no Lightning.
+
+## Reference
 
 ```bibtex
 @article{lee2023evoaug,
