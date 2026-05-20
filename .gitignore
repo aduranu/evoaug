@@ -101,3 +101,12 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# Training/eval artifacts (not part of the package)
+lightning_logs/
+plots/
+prev_models/
+slurm_outputs/
+*.h5
+*.ckpt
+
