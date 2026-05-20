@@ -52,10 +52,18 @@ single line of code (`loader.disable_augmentations()`).
 
 ### Fixed
 
-- `RandomInsertion`: off-by-one in the insertion-window index calculation
-  that could clip the last position.
+- `RandomInsertion`: rewritten to actually preserve sequence length L as
+  the docstring claimed. The v1 implementation padded both ends with
+  `insert_max` random nucleotides, producing tensors of shape
+  `(N, A, L + insert_max)`. v2 trims the insertion result back to L.
 - `RandomTranslocation`: tightened shift bookkeeping so the output is
   guaranteed `(N, A, L)` regardless of shift direction.
+
+**Reproducibility note:** `RandomInsertion` and `RandomTranslocation`
+augmentation outputs are not bit-identical to v1 for the same RNG seed.
+Statistical training behavior is equivalent (and in the
+`RandomInsertion` case, v2 actually matches the documented contract).
+If you need exact v1 outputs, keep using `evoaug<2.0.0`.
 
 ### Migration guide
 
